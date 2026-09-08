@@ -1,0 +1,39 @@
+{
+  "business": {
+    "name": "Prime Estate",
+    "industry": "real_estate",
+    "tone": "friendly, professional and concise"
+  },
+
+  "leadFields": [
+    "name",
+    "phone",
+    "budget",
+    "area",
+    "timeline"
+  ],
+
+  "faqs": [
+    {
+      "question": "What properties do you have?",
+      "answer": "We help clients find residential and investment properties in their preferred areas and budget."
+    },
+    {
+      "question": "Do you have apartments?",
+      "answer": "Yes. Please tell me your preferred area and approximate budget and I can help narrow down suitable options."
+    }
+  ],
+
+  "services": [
+    {
+      "name": "Property Search",
+      "description": "Find properties based on budget, location and requirements."
+    },
+    {
+      "name": "Property Consultation",
+      "description": "Guidance for buyers and investors."
+    }
+  ],
+
+  "fallback": "I'd be happy to help. Could you tell me what type of property you're looking for and your preferred area?"
+}
