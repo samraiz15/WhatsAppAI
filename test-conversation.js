@@ -8,18 +8,22 @@ const { processMessage } = require('./conversation');
 
 const phone = '+923009999999';
 
-const messages = [
-  'Hi, I need a house',
-  'My budget is 2 crore',
-  'DHA Lahore',
-  'I want to buy in 3 months',
-  'My name is Ahmed'
-];
+async function main() {
+  const messages = [
+    'Hi, I need a house',
+    'My budget is 2 crore',
+    'DHA Lahore',
+    'I want to buy in 3 months',
+    'My name is Ahmed'
+  ];
 
-for (const message of messages) {
-  const result = processMessage(phone, message);
+  for (const message of messages) {
+    const result = await processMessage(phone, message);
 
-  console.log('\nUSER:', message);
-  console.log('AGENT:', result.reply);
-  console.log('LEAD:', result.lead);
+    console.log('\nUSER:', message);
+    console.log('AGENT:', result.reply);
+    console.log('LEAD:', result.lead);
+  }
 }
+
+main().catch(console.error);

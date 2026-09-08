@@ -1,5 +1,6 @@
 const { getOrCreateLead, updateLeadInfo, addMessage } = require('./db');
 const { findFAQ } = require('./agent');
+const { askOllama } = require('./ollama');
 
 function detectInterest(message) {
   const text = message.toLowerCase();
@@ -31,14 +32,6 @@ function detectTimeline(message) {
 function detectArea(message) {
   if (detectTimeline(message)) return null;
 
-  const text = message.trim();
-
-  const explicit = text.match(
-    /\b(?:in|at|near)\s+([a-zA-Z][a-zA-Z\s-]{2,40})$/i
-  );
-
-  if (explicit) return explicit[1].trim();
-
   const knownAreas = [
     'DHA Lahore',
     'Bahria Town',
@@ -48,12 +41,16 @@ function detectArea(message) {
   ];
 
   for (const area of knownAreas) {
-    if (text.toLowerCase().includes(area.toLowerCase())) {
+    if (message.toLowerCase().includes(area.toLowerCase())) {
       return area;
     }
   }
 
-  return null;
+  const match = message.match(
+    /\b(?:in|at|near)\s+([a-zA-Z][a-zA-Z\s-]{2,40})$/i
+  );
+
+  return match ? match[1].trim() : null;
 }
 
 function detectName(message) {
@@ -64,7 +61,7 @@ function detectName(message) {
   return match ? match[1].trim() : null;
 }
 
-function processMessage(phone, message) {
+async function processMessage(phone, message) {
   getOrCreateLead(phone);
 
   const info = {
@@ -76,7 +73,7 @@ function processMessage(phone, message) {
     notes: null
   };
 
-  const lead = updateLeadInfo(phone, info);
+  updateLeadInfo(phone, info);
 
   addMessage(phone, 'incoming', message);
 
@@ -84,10 +81,13 @@ function processMessage(phone, message) {
 
   if (faq) {
     addMessage(phone, 'outgoing', faq);
-    return { reply: faq, lead };
+    return {
+      reply: faq,
+      lead: getOrCreateLead(phone)
+    };
   }
 
-  const updated = getOrCreateLead(phone);
+  const lead = getOrCreateLead(phone);
 
   const questions = {
     interest: 'What type of property are you looking for?',
@@ -98,21 +98,45 @@ function processMessage(phone, message) {
   };
 
   for (const field of ['interest', 'budget', 'area', 'timeline', 'name']) {
-    if (!updated[field]) {
+    if (!lead[field]) {
       const reply = questions[field];
+
       addMessage(phone, 'outgoing', reply);
-      return { reply, lead: updated };
+
+      return {
+        reply,
+        lead
+      };
     }
   }
 
-  const reply =
-    `Thanks ${updated.name}. I have your requirements: ` +
-    `${updated.interest}, ${updated.budget}, ${updated.area}, ` +
-    `timeline ${updated.timeline}. We'll help you with the next steps.`;
+  let reply;
+
+  try {
+    reply = await askOllama(
+      `You are the customer assistant for ${require('./agent').config.business.name}.
+Tone: ${require('./agent').config.business.tone}.
+
+Customer message:
+${message}
+
+Customer lead information:
+${JSON.stringify(lead)}
+
+Reply naturally in 1-2 short sentences. Do not invent property listings, prices,
+availability, locations, or business policies.`
+    );
+  } catch {
+    reply =
+      `Thanks ${lead.name}. I have your requirements and we'll help you with the next steps.`;
+  }
 
   addMessage(phone, 'outgoing', reply);
 
-  return { reply, lead: updated };
+  return {
+    reply,
+    lead
+  };
 }
 
 module.exports = { processMessage };

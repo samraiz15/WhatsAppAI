@@ -7,7 +7,10 @@ function askOllama(prompt) {
     const body = JSON.stringify({
       model: MODEL,
       prompt,
-      stream: false
+      stream: false,
+      options: {
+        temperature: 0.2
+      }
     });
 
     const request = http.request(
@@ -37,7 +40,21 @@ function askOllama(prompt) {
               return;
             }
 
-            resolve(result.response.trim());
+            const answer = result.response?.trim();
+
+            if (!answer) {
+              reject(new Error('Empty Ollama response'));
+              return;
+            }
+
+            const blocked = /\b(qwen|ollama|alibaba cloud|language model|ai model)\b/i;
+
+            if (blocked.test(answer)) {
+              reject(new Error('Invalid white-label response'));
+              return;
+            }
+
+            resolve(answer);
           } catch {
             reject(new Error('Invalid Ollama response'));
           }
