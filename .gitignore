@@ -1,0 +1,9 @@
+node_modules/
+npm-cache/
+*.rc14
+whatsapp-qr.png
+auth/
+.env
+*.db
+*.db-shm
+*.db-wal
