@@ -58,9 +58,9 @@ function detectArea(message) {
     'Gulberg',
     'Johar Town',
     'Model Town',
-    'Park View',
     'Park View City',
-    'ParkView City'
+    'ParkView City',
+    'Park View'
   ];
 
   for (const area of knownAreas) {
@@ -84,6 +84,14 @@ function detectName(message) {
   return match ? match[1].trim() : null;
 }
 
+function detectPropertySize(message) {
+  const match = String(message || '').match(
+    /\b(3\.5|5|7|10|15|20)\s*marla\b|\b(1|2)\s*kanal\b/i
+  );
+
+  return match ? match[0].replace(/\s+/g, ' ').trim() : null;
+}
+
 async function processMessage(phone, message) {
   getOrCreateLead(phone);
 
@@ -93,6 +101,7 @@ async function processMessage(phone, message) {
     budget: detectBudget(message),
     area: detectArea(message),
     timeline: detectTimeline(message),
+    property_size: detectPropertySize(message),
     notes: null
   };
 
@@ -176,4 +185,10 @@ availability, locations, or business policies.`
   };
 }
 
-module.exports = { processMessage, detectArea, detectBudget, detectTimeline };
+module.exports = {
+  processMessage,
+  detectArea,
+  detectBudget,
+  detectTimeline,
+  detectPropertySize
+};
