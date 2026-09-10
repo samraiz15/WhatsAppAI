@@ -14,6 +14,8 @@ db.exec(`
     area TEXT,
     timeline TEXT,
     notes TEXT,
+    profession TEXT,
+    location TEXT,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
   );
@@ -26,6 +28,18 @@ db.exec(`
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
   );
 `);
+
+// Automatic schema migration for existing databases.
+const leadColumns = db.prepare('PRAGMA table_info(leads)').all();
+const leadColumnNames = new Set(leadColumns.map(c => c.name));
+
+if (!leadColumnNames.has('property_size')) {
+  db.exec('ALTER TABLE leads ADD COLUMN property_size TEXT');
+}
+
+if (!leadColumnNames.has('budget_numeric')) {
+  db.exec('ALTER TABLE leads ADD COLUMN budget_numeric INTEGER');
+}
 
 const findLead = db.prepare(`
   SELECT * FROM leads WHERE phone = ?
@@ -43,6 +57,10 @@ const updateLead = db.prepare(`
       area = COALESCE(?, area),
       timeline = COALESCE(?, timeline),
       notes = COALESCE(?, notes),
+      profession = COALESCE(?, profession),
+      location = COALESCE(?, location),
+      property_size = COALESCE(?, property_size),
+      budget_numeric = COALESCE(?, budget_numeric),
       updated_at = CURRENT_TIMESTAMP
   WHERE phone = ?
 `);
@@ -71,6 +89,10 @@ function updateLeadInfo(phone, info) {
     info.area ?? null,
     info.timeline ?? null,
     info.notes ?? null,
+    info.profession ?? null,
+    info.location ?? null,
+    info.property_size ?? null,
+    info.budget_numeric ?? null,
     phone
   );
 

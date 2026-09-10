@@ -15,18 +15,38 @@ function detectInterest(message) {
 
 function detectBudget(message) {
   const match = message.match(
-    /(?:budget\s*(?:is|of)?\s*)?([\d,.]+)\s*(crore|cr|lakh|lac)\b/i
+    /(?:budget\s*(?:is|of)?\s*)?([\d,.]+)\s*(crore|crores|corror|coror|cr|lakh|lakhs|lac)\b/i
   );
 
   return match ? `${match[1]} ${match[2]}` : null;
 }
 
 function detectTimeline(message) {
-  const match = message.match(
-    /\b(\d+)\s*(day|days|week|weeks|month|months|year|years)\b/i
-  );
+  const text = message.trim().toLowerCase();
 
-  return match ? `${match[1]} ${match[2]}` : null;
+  if (/\b(as\s+soon\s+as\s+possible|soon\s+as\s+possible|asap|soon)\b/i.test(text)) {
+    return 'As soon as possible';
+  }
+
+  const numbers = {
+    one: '1',
+    two: '2',
+    three: '3',
+    four: '4',
+    five: '5',
+    six: '6',
+    seven: '7',
+    eight: '8',
+    nine: '9',
+    ten: '10'
+  };
+
+  const match = text.match(/\b(\d+|one|two|three|four|five|six|seven|eight|nine|ten)\s*(day|days|week|weeks|month|months|year|years)\b/i);
+
+  if (!match) return null;
+
+  const value = numbers[match[1].toLowerCase()] || match[1];
+  return `${value} ${match[2]}`;
 }
 
 function detectArea(message) {
@@ -37,7 +57,10 @@ function detectArea(message) {
     'Bahria Town',
     'Gulberg',
     'Johar Town',
-    'Model Town'
+    'Model Town',
+    'Park View',
+    'Park View City',
+    'ParkView City'
   ];
 
   for (const area of knownAreas) {
@@ -89,6 +112,20 @@ async function processMessage(phone, message) {
 
   const lead = getOrCreateLead(phone);
 
+  if (lead.name && lead.interest && lead.budget && lead.area && lead.timeline) {
+    const reply =
+      `Perfect, ${lead.name}. I've noted your ${lead.property_size ? lead.property_size + ' ' : ''}` +
+      `${lead.interest} requirement in ${lead.area} with a ${lead.budget} budget and ` +
+      `${lead.timeline} timeline.`;
+
+    addMessage(phone, 'outgoing', reply);
+
+    return {
+      reply,
+      lead
+    };
+  }
+
   const questions = {
     interest: 'What type of property are you looking for?',
     budget: 'What is your approximate budget?',
@@ -139,4 +176,4 @@ availability, locations, or business policies.`
   };
 }
 
-module.exports = { processMessage };
+module.exports = { processMessage, detectArea, detectBudget, detectTimeline };

@@ -7,3 +7,5 @@ auth/
 *.db
 *.db-shm
 *.db-wal
+
+pairing-auth/
