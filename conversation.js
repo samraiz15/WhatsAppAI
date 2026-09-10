@@ -1,5 +1,6 @@
 const { getOrCreateLead, updateLeadInfo, addMessage } = require('./db');
 const { findFAQ } = require('./agent');
+const { routeParkViewQuestion } = require('./router');
 const { askOllama } = require('./ollama');
 
 function detectInterest(message) {
@@ -142,6 +143,20 @@ async function processMessage(phone, message) {
   }
 
   const lead = getOrCreateLead(phone);
+
+  if (/park\s*view(?:\s*city)?/i.test(String(message || '')) ||
+      /\b(?:amenities|amenity|facilities|facility|park|mosque|school|schools|commercial|location|located|payment plan|installments?|prices?|availability|available|blocks?)\b/i.test(String(message || ''))) {
+    const parkViewReply = await routeParkViewQuestion(message, lead);
+
+    if (parkViewReply) {
+      addMessage(phone, 'outgoing', parkViewReply);
+
+      return {
+        reply: parkViewReply,
+        lead
+      };
+    }
+  }
 
   if (lead.name && lead.interest && lead.budget && lead.area && lead.timeline) {
     const reply =

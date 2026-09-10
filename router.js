@@ -4,6 +4,10 @@ const { getParkViewContext } = require('./parkview_knowledge');
 function detectIntent(message) {
   const t = String(message || '').toLowerCase();
 
+  if (/facilit(?:y|ies)/.test(t) && !/inventory|listing|listings|vacant/.test(t)) {
+    return 'amenities';
+  }
+
   if (/available|availability|vacant|inventory|listing|listings/.test(t)) {
     return 'availability';
   }
@@ -66,6 +70,28 @@ async function routeParkViewQuestion(message, lead = {}) {
     return "Park View City Lahore is located on Main Multan Road, approximately 3 km from Thokar Niaz Baig. It also has access toward Canal Road, M-2 Motorway and Lahore Ring Road.";
   }
 
+  if (intent === 'amenities') {
+    const t = String(message || '').toLowerCase();
+
+    if (/school|schools/.test(t)) {
+      return "Park View City Lahore has school/educational facilities referenced in project material, including an international school. Exact operating status and current availability should be verified.";
+    }
+
+    if (/mosque|mosques/.test(t)) {
+      return "Park View City Lahore has mosque facilities referenced in project material, including the Grand Jamia Mosque. Exact operating status and location should be verified for the current period.";
+    }
+
+    if (/commercial/.test(t)) {
+      return "Park View City Lahore has commercial areas referenced in project material, including commercial markaz and retail facilities. Exact current availability should be verified.";
+    }
+
+    if (/park|parks|green|recreational/.test(t)) {
+      return "Yes. Park View City Lahore references parks and green areas, including Central Park, along with jogging/cycling facilities in project material. Exact availability and operating status should be verified.";
+    }
+
+    return "Park View City Lahore commonly references parks and green areas, mosques, commercial areas, schools, medical facilities, recreational areas, utilities and security facilities. Exact availability and operating status should be verified for the current period.";
+  }
+
   if (intent === 'block_comparison') {
     const size = lead.property_size || 'your required size';
     const budget = lead.budget || 'your budget';
@@ -81,11 +107,11 @@ async function routeParkViewQuestion(message, lead = {}) {
     return `Perfect, ${name}. I'll focus on ${size} Park View City house options that fit your ${budget} budget.`;
   }
 
-  if (/\\b(?:i want|looking for|need)\\b/.test(String(message || '').toLowerCase()) &&
-      /\\b(?:house|home)\\b/.test(String(message || '').toLowerCase()) &&
-      /\\b(?:marla|kanal)\\b/.test(String(message || '').toLowerCase())) {
+  if (/\b(?:i want|looking for|need)\b/.test(String(message || '').toLowerCase()) &&
+      /\b(?:house|home)\b/.test(String(message || '').toLowerCase()) &&
+      /\b(?:marla|kanal)\b/.test(String(message || '').toLowerCase())) {
     const t = String(message || '').toLowerCase();
-    const size = t.match(/\\b(?:3\\.5|5|7|10|15|20)\\s*marla\\b|\\b(?:1|2)\\s*kanal\\b/);
+    const size = t.match(/\b(?:3\.5|5|7|10|15|20)\s*marla\b|\b(?:1|2)\s*kanal\b/);
     const sizeText = size ? size[0].replace(/\\s+/g, ' ').trim() : 'the requested size';
 
     return `Understood. You're looking for a ${sizeText} house in Park View City. If you share your budget and purchase timeline, I can narrow the suitable options and blocks for you.`;
