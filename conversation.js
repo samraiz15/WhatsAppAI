@@ -21,6 +21,27 @@ function detectBudget(message) {
   return match ? `${match[1]} ${match[2]}` : null;
 }
 
+function parseBudgetNumeric(budget) {
+  if (!budget) return null;
+
+  const match = budget.match(
+    /([\d,.]+)\s*(crore|crores|corror|coror|cr|lakh|lakhs|lac)\b/i
+  );
+
+  if (!match) return null;
+
+  const amount = Number(match[1].replace(/,/g, ''));
+  if (!Number.isFinite(amount)) return null;
+
+  const unit = match[2].toLowerCase();
+
+  if (['crore', 'crores', 'corror', 'coror', 'cr'].includes(unit)) {
+    return Math.round(amount * 10000000);
+  }
+
+  return Math.round(amount * 100000);
+}
+
 function detectTimeline(message) {
   const text = message.trim().toLowerCase();
 
@@ -99,6 +120,7 @@ async function processMessage(phone, message) {
     name: detectName(message),
     interest: detectInterest(message),
     budget: detectBudget(message),
+    budget_numeric: parseBudgetNumeric(detectBudget(message)),
     area: detectArea(message),
     timeline: detectTimeline(message),
     property_size: detectPropertySize(message),
@@ -190,5 +212,6 @@ module.exports = {
   detectArea,
   detectBudget,
   detectTimeline,
-  detectPropertySize
+  detectPropertySize,
+  parseBudgetNumeric
 };
