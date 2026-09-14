@@ -238,6 +238,12 @@ function normalizePropertyText(value) {
 function detectSearchPropertyType(text) {
   const value = normalizePropertyText(text);
 
+  // Explicit house/home/villa terminology must take priority.
+  // Listing formats such as F.P+R.P can otherwise be mistaken for plots.
+  if (/\b(?:house|home|villa|bungalow)\b/i.test(value)) {
+    return "House";
+  }
+
   // Explicit plot terminology
   if (
     /\b(?:plot|plots|land|parcel)\b/.test(value) ||
