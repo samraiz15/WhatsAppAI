@@ -439,10 +439,13 @@ async function processMessage(phone, message, options = {}) {
   const pendingSearch =
     commandState === "pending_search";
 
-  const implicitSearch =
+  const hasSearchCriteria =
     detectSearchPropertyType(text) !== null ||
     detectSearchSize(text) !== null ||
     detectSearchBudget(text) !== null;
+
+  const implicitSearch =
+    isOwner && hasSearchCriteria;
 
   if (
     isOwner &&
