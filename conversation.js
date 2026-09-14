@@ -1,22 +1,25 @@
-const { getOrCreateLead, updateLeadInfo, addMessage } = require('./db');
+const { getOrCreateLead, updateLeadInfo, addMessage, searchGroupMessages } = require('./db');
+const { addMonitoredGroup, getMonitoredGroups, disableMonitoredGroup, setCommandState, getCommandState } = require('./groups');
 const { findFAQ } = require('./agent');
 const { routeParkViewQuestion } = require('./router');
 const { askOllama } = require('./ollama');
 
 function detectInterest(message) {
-  const text = message.toLowerCase();
+  const text = String(message || '').toLowerCase();
 
-  if (/\bhouse\b|\bhome\b/.test(text)) return 'House';
-  if (/\bapartment\b|\bflat\b/.test(text)) return 'Apartment';
-  if (/\bplot\b/.test(text)) return 'Plot';
-  if (/\boffice\b/.test(text)) return 'Office';
+  if (/\b(?:plot|plots|land|parcel)\b/.test(text)) return 'Plot';
+  if (/\b(?:house|home|villa|bungalow|farmhouse)\b/.test(text)) return 'House';
+  if (/\b(?:apartment|apartments|flat|flats|penthouse)\b/.test(text)) return 'Apartment';
+  if (/\b(?:office|offices)\b/.test(text)) return 'Office';
+  if (/\b(?:shop|shops|showroom|showrooms|store|stores)\b/.test(text)) return 'Shop';
+  if (/\b(?:building|buildings|plaza|plazas|tower|towers)\b/.test(text)) return 'Building';
 
   return null;
 }
 
 function detectBudget(message) {
   const match = message.match(
-    /(?:budget\s*(?:is|of)?\s*)?([\d,.]+)\s*(crore|crores|corror|coror|cr|lakh|lakhs|lac)\b/i
+    /(?:budget\s*(?:is|of)?\s*)?([\d,.]+)\s*(crore|crores|corror|coror|crorr|cororr|cr|lakh|lakhs|lac)\b/i
   );
 
   return match ? `${match[1]} ${match[2]}` : null;
@@ -26,7 +29,7 @@ function parseBudgetNumeric(budget) {
   if (!budget) return null;
 
   const match = budget.match(
-    /([\d,.]+)\s*(crore|crores|corror|coror|cr|lakh|lakhs|lac)\b/i
+    /([\d,.]+)\s*(crore|crores|corror|coror|crorr|cororr|cr|lakh|lakhs|lac)\b/i
   );
 
   if (!match) return null;
@@ -36,7 +39,7 @@ function parseBudgetNumeric(budget) {
 
   const unit = match[2].toLowerCase();
 
-  if (['crore', 'crores', 'corror', 'coror', 'cr'].includes(unit)) {
+  if (['crore', 'crores', 'corror', 'coror', 'crorr', 'cororr', 'cr'].includes(unit)) {
     return Math.round(amount * 10000000);
   }
 
@@ -71,33 +74,121 @@ function detectTimeline(message) {
   return `${value} ${match[2]}`;
 }
 
+function detectSearchBlock(message) {
+  const text = normalizePropertyText(message);
+  const blocks = [
+    ["crystal extension", "crystal extension"],
+    ["tulip extension", "tulip extension"],
+    ["tulip overseas", "tulip overseas"],
+    ["silver block", "silver"],
+    ["platinum block", "platinum"],
+    ["crystal block", "crystal"],
+    ["pearl block", "pearl"],
+    ["diamond block", "diamond"],
+    ["platinum", "platinum"],
+    ["crystal", "crystal"],
+    ["silver", "silver"],
+    ["tulip", "tulip"],
+    ["diamond", "diamond"],
+    ["pearl", "pearl"]
+  ];
+  for (const [alias, canonical] of blocks) {
+    if (text.includes(normalizePropertyText(alias))) return canonical;
+  }
+  return null;
+}
+
+function extractMatchingPropertySection(message, searchBlock) {
+  const raw = String(message || '')
+    .replace(/\r\n/g, '\n')
+    .trim();
+
+  if (!raw || !searchBlock) {
+    return raw;
+  }
+
+  const target = String(searchBlock).toLowerCase().trim();
+
+  const escapeRegex = value =>
+    value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+  const startRegex = new RegExp(
+    '^\\s*[*_#•🔹\\-\\s]*' +
+    escapeRegex(target) +
+    '(?:\\s+block)?\\b.*$',
+    'im'
+  );
+
+  const startMatch = raw.match(startRegex);
+
+  if (!startMatch || startMatch.index === undefined) {
+    return raw;
+  }
+
+  const startIndex = startMatch.index;
+
+  const blockHeaderRegex =
+    /^\s*[-*_#•🔹 ]*(?:crystal extension|tulip extension|tulip overseas|silver block|platinum block|crystal block|pearl block|diamond block|imperial block|overseas block|silver|platinum|crystal|tulip|diamond|pearl)\b.*$/im;
+
+  const remaining =
+    raw.slice(startIndex + startMatch[0].length);
+
+  const nextMatch = remaining.match(blockHeaderRegex);
+
+  const sectionEnd = nextMatch
+    ? startIndex + startMatch[0].length + nextMatch.index
+    : raw.length;
+
+  let section = raw.slice(startIndex, sectionEnd).trim();
+
+  const contactMatch = section.match(
+    /\n\s*(?:📞|contact\s*:|call\s*:|whatsapp\s*:)/i
+  );
+
+  if (contactMatch && contactMatch.index !== undefined) {
+    section = section.slice(0, contactMatch.index).trim();
+  }
+
+  return section;
+}
+
 function detectArea(message) {
   if (detectTimeline(message)) return null;
 
   const knownAreas = [
-    'DHA Lahore',
-    'Bahria Town',
-    'Gulberg',
-    'Johar Town',
-    'Model Town',
-    'Park View City',
-    'ParkView City',
-    'Park View'
+    "DHA Lahore",
+    "Bahria Town",
+    "Gulberg",
+    "Johar Town",
+    "Model Town",
+    "Park View City",
+    "ParkView City",
+    "Park View",
+    "Platinum",
+    "Crystal",
+    "Crystal Extension",
+    "Silver",
+    "Silver Block",
+    "Tulip",
+    "Tulip Extension",
+    "Tulip Overseas",
+    "Diamond"
   ];
 
+  const text = String(message || "").toLowerCase();
+
   for (const area of knownAreas) {
-    if (message.toLowerCase().includes(area.toLowerCase())) {
+    if (text.includes(area.toLowerCase())) {
       return area;
     }
   }
 
-  const match = message.match(
+  const match = String(message || "").match(
     /\b(?:in|at|near)\s+([a-zA-Z][a-zA-Z\s-]{2,40})$/i
   );
 
   return match ? match[1].trim() : null;
 }
-
 function detectName(message) {
   const match = message.match(
     /^(?:my name is|i am|i'm|this is)\s+([a-zA-Z][a-zA-Z\s'-]{1,40})$/i
@@ -114,8 +205,568 @@ function detectPropertySize(message) {
   return match ? match[0].replace(/\s+/g, ' ').trim() : null;
 }
 
-async function processMessage(phone, message) {
-  getOrCreateLead(phone);
+function getCommandMenu() {
+  return `WhatsAppAI
+
+Available commands:
+
+1. LIST - Show commands
+2. ADD GROUP - Add a WhatsApp group
+3. GROUPS - Show monitored groups
+4. SEARCH - Find property/deal
+5. LEADS - Show matched leads
+6. PARKVIEW - Park View information
+7. STATUS - Agent status
+
+You can also simply ask me normally.`;
+}
+
+
+function normalizePropertyText(value) {
+  return String(value || '')
+    .toLowerCase()
+    .replace(/\b5\s*-?\s*m(?:arla)?\b/g, '5 marla')
+    .replace(/\b10\s*-?\s*m(?:arla)?\b/g, '10 marla')
+    .replace(/\b7\s*-?\s*m(?:arla)?\b/g, '7 marla')
+    .replace(/\b3\.5\s*-?\s*m(?:arla)?\b/g, '3.5 marla')
+    .replace(/\b15\s*-?\s*m(?:arla)?\b/g, '15 marla')
+    .replace(/\b20\s*-?\s*m(?:arla)?\b/g, '20 marla')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function detectSearchPropertyType(text) {
+  const value = normalizePropertyText(text);
+
+  // Explicit plot terminology
+  if (
+    /\b(?:plot|plots|land|parcel)\b/.test(value) ||
+    /\bplot\s*#?\s*\d+\b/.test(value) ||
+    /\bplot\s+no\.?\s*\d+\b/.test(value)
+  ) {
+    return 'Plot';
+  }
+
+  // Common plot-listing format:
+  // 5M + F.P/R.P/H.P/T.F + possession/payment/offer terminology
+  if (
+    /\b(?:3\.5|5|7|10|15|20)\s*marla\b/.test(value) &&
+    /\b(?:fp|f\.p|rp|r\.p|hp|h\.p|tf|t\.f|ndc|possession|paid|offer|required)\b/.test(value)
+  ) {
+    return 'Plot';
+  }
+
+  if (
+    /\b(?:house|houses|home|homes|villa|villas|bungalow|bungalows|farmhouse)\b/.test(value)
+  ) {
+    return 'House';
+  }
+
+  if (
+    /\b(?:apartment|apartments|flat|flats|penthouse)\b/.test(value)
+  ) {
+    return 'Apartment';
+  }
+
+  if (/\b(?:office|offices)\b/.test(value)) {
+    return 'Office';
+  }
+
+  if (
+    /\b(?:shop|shops|showroom|showrooms|store|stores)\b/.test(value)
+  ) {
+    return 'Shop';
+  }
+
+  if (
+    /\b(?:building|buildings|plaza|plazas|tower|towers)\b/.test(value)
+  ) {
+    return 'Building';
+  }
+
+  return null;
+}
+
+function detectSearchSize(text) {
+  const value = normalizePropertyText(text);
+
+  const match = value.match(
+    /\b(3\.5|5|7|10|15|20)\s*-?\s*(?:marla|m)\b/i
+  );
+
+  return match ? Number(match[1]) : null;
+}
+
+function detectSearchBudget(text) {
+  const value = String(text || '').toLowerCase();
+
+  const match = value.match(
+    /([\d,.]+)\s*(crore|crores|corror|coror|crorr|cororr|cr|lakh|lakhs|lac)\b/i
+  );
+
+  if (!match) return null;
+
+  const amount = Number(match[1].replace(/,/g, ''));
+
+  if (!Number.isFinite(amount)) return null;
+
+  const unit = match[2];
+
+  if (/^(crore|crores|corror|coror|crorr|cororr|cr)$/.test(unit)) {
+    return amount * 10000000;
+  }
+
+  return amount * 100000;
+}
+
+
+function detectImplicitListingBudget(text) {
+  const value = String(text || '')
+    .replace(/[*_]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  const match = value.match(
+    /\b(?:3\.5|5|7|10|15|20)\s*-?\s*M(?:arla)?\b[\s\S]{0,120}?(?:F\.P(?:\+R\.P)?|H\.P(?:\s+Only)?|T\.F(?:\s+Only)?)[\s\S]{0,50}?\b(\d+(?:\.\d+)?)\b/i
+  );
+
+  if (!match) return null;
+
+  const amount = Number(match[1]);
+
+  return Number.isFinite(amount) ? amount * 100000 : null;
+}
+
+function propertyTypeMatches(searchType, listingText) {
+  if (!searchType) return true;
+
+  const type = detectSearchPropertyType(listingText);
+
+  if (type === searchType) return true;
+
+  return false;
+}
+
+function scorePropertyMatch(query, listing) {
+  const searchType = detectSearchPropertyType(query);
+  const searchSize = detectSearchSize(query);
+  const searchBudget = detectSearchBudget(query);
+  const searchBlock = detectSearchBlock(query);
+  const text = normalizePropertyText(listing.message);
+  const listingBlock = searchBlock ? detectSearchBlock(text) : null;
+
+  if (searchType && !propertyTypeMatches(searchType, text)) return -1;
+  if (searchSize && detectSearchSize(text) !== searchSize) return -1;
+  if (searchBlock && listingBlock !== searchBlock) return -1;
+
+  if (searchBudget) {
+    const listingBudget = detectSearchBudget(text);
+    if (listingBudget === null || listingBudget > searchBudget) return -1;
+  }
+
+  let score = 0;
+  if (searchType) score += 50;
+  if (searchSize) score += 30;
+  if (searchBlock) score += 40;
+
+  if (searchBudget) {
+    const listingBudget = detectSearchBudget(text);
+    score += 20 * (listingBudget / searchBudget);
+  }
+
+  return score;
+}
+
+function rankPropertySearchResults(query, results) {
+  const searchBudget = detectSearchBudget(query);
+  const searchBlock = detectSearchBlock(query);
+  const searchType = detectSearchPropertyType(query);
+  const searchSize = detectSearchSize(query);
+
+  return results
+    .map((row, originalIndex) => {
+      const text = normalizePropertyText(row.message);
+      const listingBlock = detectSearchBlock(text);
+      const listingSize = detectSearchSize(text);
+      const match_score = scorePropertyMatch(query, row);
+
+      if (searchBlock && listingBlock !== searchBlock) return null;
+      if (searchSize && listingSize !== searchSize) return null;
+      if (searchType && !propertyTypeMatches(searchType, text)) return null;
+
+      const listingBudget = detectSearchBudget(text);
+      if (searchBudget !== null && (listingBudget === null || listingBudget > searchBudget)) return null;
+      if (match_score < 50) return null;
+
+      return { ...row, match_score, _originalIndex: originalIndex };
+    })
+    .filter(Boolean)
+    .sort((a,b) => b.match_score - a.match_score || a._originalIndex - b._originalIndex)
+    .map(row => { const clean={...row}; delete clean._originalIndex; return clean; });
+}
+
+async function processMessage(phone, message, options = {}) {
+  const isOwner = options.isOwner === true;
+  const text = String(message || '').trim();
+
+  const ownerCommandMap = {
+    '0': 'open connection',
+    '1': 'list',
+    '2': 'add group',
+    '3': 'groups',
+    '4': 'search',
+    '5': 'leads',
+    '6': 'parkview',
+    '7': 'status'
+  };
+
+  const ownerCommandText =
+    isOwner && ownerCommandMap[text]
+      ? ownerCommandMap[text]
+      : text;
+
+  const ownerCommand =
+    /^(open connection|list|add group|remove group|groups|search|leads|parkview|status)$/i.test(ownerCommandText);
+
+  const commandState = getCommandState(phone);
+
+  const pendingGroupAdd =
+    commandState === "pending_group_add";
+
+  const pendingGroupRemove =
+    commandState === "pending_group_remove";
+
+  const pendingSearch =
+    commandState === "pending_search";
+
+  const implicitSearch =
+    detectSearchPropertyType(text) !== null ||
+    detectSearchSize(text) !== null ||
+    detectSearchBudget(text) !== null;
+
+  if (
+    isOwner &&
+    !ownerCommand &&
+    !pendingGroupAdd &&
+    !pendingGroupRemove &&
+    !pendingSearch
+    && !(
+      detectSearchPropertyType(text) ||
+      detectSearchSize(text) ||
+      detectSearchBudget(text)
+    ) &&
+    !implicitSearch
+  ) {
+    console.log('OWNER NON-COMMAND IGNORED:', text);
+    return {
+      reply: null,
+      lead: null
+    };
+  }
+
+  if (!isOwner) {
+    getOrCreateLead(phone);
+  }
+  if (isOwner && /^open connection$/i.test(ownerCommandText)) {
+    setCommandState(phone, null);
+
+    const reply = "Opening WhatsApp connection...";
+
+    addMessage(phone, 'incoming', message);
+    addMessage(phone, 'outgoing', reply);
+
+    return {
+      reply,
+      lead: null,
+      action: 'open_connection'
+    };
+  }
+
+  // OWNER STATUS MUST NEVER ENTER THE LEAD FLOW
+  if (isOwner && /^status$/i.test(ownerCommandText)) {
+    setCommandState(phone, null);
+
+    const groups = getMonitoredGroups(phone);
+
+    const reply =
+      `WhatsAppAI Status\n\n` +
+      `Owner mode: ACTIVE\n` +
+      `Monitored groups: ${groups.length}\n` +
+      `Lead mode: DISABLED for owner`;
+
+    addMessage(phone, 'incoming', message);
+    addMessage(phone, 'outgoing', reply);
+
+    return {
+      reply,
+      lead: null
+    };
+  }
+
+  if (pendingSearch || implicitSearch) {
+    const searchText = text;
+
+    if (!searchText) {
+      const reply =
+        "Please send the property, deal, area, plot size, or budget you want me to search for.";
+
+      addMessage(phone, "outgoing", reply);
+
+      return {
+        reply,
+        lead: null
+      };
+    }
+
+    const searchCandidates =
+      searchGroupMessages(phone, '', 500);
+
+    const results =
+      rankPropertySearchResults(searchText, searchCandidates)
+        .slice(0, 10);
+
+    setCommandState(phone, null);
+
+    let reply;
+
+    if (!results.length) {
+      reply =
+        `No suitable property/deal matches found for "${searchText}".`;
+    } else {
+      const searchBlock = detectSearchBlock(searchText);
+
+      const resultLines = results.map((row, index) => {
+        const sender =
+          row.sender_name ||
+          "Unknown sender";
+
+        const phone =
+          String(row.sender_phone || "")
+            .split("@")[0]
+            .split(":")[0]
+            .trim();
+
+        const messageText =
+          String(row.message || "").trim();
+
+        const propertyDetails =
+          extractMatchingPropertySection(
+            messageText,
+            searchBlock
+          );
+
+        const shortened =
+          propertyDetails.length > 700
+            ? propertyDetails.slice(0, 700) + "..."
+            : propertyDetails;
+
+        return (
+          `${index + 1}️⃣ ${sender}\n` +
+          (phone ? `📞 ${phone}\n` : "") +
+          shortened
+        );
+      });
+
+      reply =
+        `🔎 Found ${results.length} matching properties/deals\n\n` +
+        resultLines.join("\n\n");
+    }
+
+    addMessage(phone, "incoming", message);
+    addMessage(phone, "outgoing", reply);
+
+    return {
+      reply,
+      lead: null
+    };
+  }
+
+  if (getCommandState(phone) === "pending_group_remove") {
+    const groupName = text;
+
+    if (!groupName) {
+      const reply = "Please send the exact WhatsApp group name to remove.";
+      addMessage(phone, "outgoing", reply);
+
+      return {
+        reply,
+        lead: null
+      };
+    }
+
+    if (/^(list|add group|remove group|groups|search|leads|parkview|status)$/i.test(groupName)) {
+      setCommandState(phone, null);
+      return {
+        reply: null,
+        lead: null
+      };
+    }
+
+    const result = disableMonitoredGroup(phone, groupName);
+    setCommandState(phone, null);
+
+    const reply = result.changes
+      ? `Group removed: ${groupName}`
+      : `Group not found: ${groupName}`;
+
+    addMessage(phone, "incoming", message);
+    addMessage(phone, "outgoing", reply);
+
+    return {
+      reply,
+      lead: null
+    };
+  }
+
+  if (getCommandState(phone) === "pending_group_add") {
+    const groupName = text;
+
+    if (/^(list|add group|remove group|groups|search|leads|parkview|status)$/i.test(groupName)) {
+      setCommandState(phone, null);
+    } else {
+      if (!groupName) {
+        const reply = "Please send the WhatsApp group name.";
+        addMessage(phone, "outgoing", reply);
+        return { reply, lead: null };
+      }
+
+      const group = addMonitoredGroup(phone, groupName);
+      setCommandState(phone, null);
+
+      const reply = `Group registered: ${group.group_name}`;
+
+      addMessage(phone, "incoming", message);
+      addMessage(phone, "outgoing", reply);
+
+      return {
+        reply,
+        lead: null
+      };
+    }
+  }
+
+  if (/^add group$/i.test(ownerCommandText)) {
+    const reply = "Send me the exact WhatsApp group name you want me to monitor.";
+
+    addMessage(phone, 'incoming', message);
+    addMessage(phone, 'outgoing', reply);
+
+    setCommandState(phone, "pending_group_add");
+
+    return {
+      reply,
+      lead: null
+    };
+  }
+
+  if (/^remove group$/i.test(ownerCommandText)) {
+    const reply = "Send me the exact WhatsApp group name you want me to remove.";
+
+    addMessage(phone, 'incoming', message);
+    addMessage(phone, 'outgoing', reply);
+
+    setCommandState(phone, "pending_group_remove");
+
+    return {
+      reply,
+      lead: null
+    };
+  }
+
+  if (/^groups$/i.test(ownerCommandText)) {
+    const groups = getMonitoredGroups(phone);
+
+    const reply = groups.length
+      ? "Monitored WhatsApp Groups\n\n" + groups.map((group, i) => `${i + 1}. ${group.group_name}`).join("\n")
+      : "No monitored WhatsApp groups yet.";
+
+    addMessage(phone, "incoming", message);
+    addMessage(phone, "outgoing", reply);
+
+    return {
+      reply,
+      lead: null
+    };
+  }
+
+  if (/^list$/i.test(ownerCommandText)) {
+    const reply = getCommandMenu();
+
+    addMessage(phone, 'incoming', message);
+    addMessage(phone, 'outgoing', reply);
+
+    return {
+      reply,
+      lead: null
+    };
+  }
+
+
+  if (isOwner && /^search$/i.test(ownerCommandText)) {
+    setCommandState(phone, "pending_search");
+
+    const reply =
+      "Send me the property/deal details you want to search for.\n\n" +
+      "Example: 5 marla Park View house under 2 crore";
+
+    addMessage(phone, 'incoming', message);
+    addMessage(phone, 'outgoing', reply);
+
+    return {
+      reply,
+      lead: null
+    };
+  }
+
+  if (isOwner && /^leads$/i.test(ownerCommandText)) {
+    setCommandState(phone, null);
+
+    const reply =
+      "Lead search is ready. Send the property type, area, budget or other requirement you want to match.";
+
+    addMessage(phone, 'incoming', message);
+    addMessage(phone, 'outgoing', reply);
+
+    return {
+      reply,
+      lead: null
+    };
+  }
+
+  if (isOwner && /^parkview$/i.test(ownerCommandText)) {
+    setCommandState(phone, null);
+
+    const reply = await routeParkViewQuestion("Park View City", null);
+
+    if (reply) {
+      addMessage(phone, 'incoming', message);
+      addMessage(phone, 'outgoing', reply);
+
+      return {
+        reply,
+        lead: null
+      };
+    }
+
+    const fallback =
+      "What would you like to know about Park View City?";
+
+    addMessage(phone, 'incoming', message);
+    addMessage(phone, 'outgoing', fallback);
+
+    return {
+      reply: fallback,
+      lead: null
+    };
+  }
+
+  if (isOwner && ownerCommand) {
+    console.log('OWNER COMMAND UNHANDLED:', text);
+    return {
+      reply: null,
+      lead: null
+    };
+  }
 
   const info = {
     name: detectName(message),
@@ -223,10 +874,18 @@ availability, locations, or business policies.`
 }
 
 module.exports = {
+  detectInterest,
   processMessage,
   detectArea,
   detectBudget,
   detectTimeline,
   detectPropertySize,
-  parseBudgetNumeric
+  parseBudgetNumeric,
+  normalizePropertyText,
+  detectSearchPropertyType,
+  detectSearchSize,
+  detectSearchBudget,
+  propertyTypeMatches,
+  scorePropertyMatch,
+  rankPropertySearchResults
 };

@@ -2,9 +2,68 @@ const { askOllama } = require('./ollama');
 const { getParkViewContext } = require('./parkview_knowledge');
 
 function detectIntent(message) {
-  const t = String(message || '').toLowerCase();
+  const t = String(message || '').toLowerCase().trim();
 
-  if (/facilit(?:y|ies)/.test(t) && !/inventory|listing|listings|vacant/.test(t)) {
+  if (
+    /\b(i want|i need|looking for|searching for|find me|show me|interested in)\b/.test(t) &&
+    /\b(house|home|villa|plot|apartment|flat|property)\b/.test(t)
+  ) {
+    return 'property_search';
+  }
+
+  if (
+    /\b(resale|resell|sell later|selling later|exit)\b/.test(t) &&
+    /\b(which|what|better|best|block)\b/.test(t)
+  ) {
+    return 'resale';
+  }
+
+  if (
+    /\b(living|live|family|residential|residence)\b/.test(t) &&
+    /\b(block|area|better|best|good)\b/.test(t)
+  ) {
+    return 'living';
+  }
+
+  if (/\b(invest|investment|investor|roi|return|appreciation)\b/.test(t)) {
+    return 'investment';
+  }
+
+  if (
+    /\b(best block|which block|which .*block|block.*better|better.*block)\b/.test(t) ||
+    /\bwhich is better for (living|resale)\b/.test(t) ||
+    /\bwhich block is better for (living|resale)\b/.test(t) ||
+    /\bwhich block is best for (living|resale)\b/.test(t)
+  ) {
+    if (/\b(living|live|family|residential|residence)\b/.test(t)) {
+      return 'living';
+    }
+
+    if (/\b(resale|resell|sell later|selling later|exit)\b/.test(t)) {
+      return 'resale';
+    }
+
+    return 'block_comparison';
+  }
+
+  if (/location|located|where is|where's|access|road|motorway|ring road|thokar|multan road/.test(t)) {
+    return 'location';
+  }
+
+  if (/\b(crystal)\b/.test(t)) {
+    return 'crystal';
+  }
+
+  if (/\b(diamond)\b/.test(t)) {
+    return 'diamond';
+  }
+
+  if (/\b(platinum)\b/.test(t)) {
+    return 'platinum';
+  }
+
+  if (/\b(facility|facilities|amenities|school|schools|mosque|mosques|commercial|parks?|green|recreational)\b/.test(t) &&
+      !/\bpark view city\b/.test(t)) {
     return 'amenities';
   }
 
@@ -12,44 +71,69 @@ function detectIntent(message) {
     return 'availability';
   }
 
-  if (/price|prices|cost|rate|rates|how much/.test(t)) {
+  if (/price|prices|cost|rate|rates|how much|worth|value/.test(t)) {
     return 'price';
   }
 
-  if (/payment|installment|installments|payment plan|plan/.test(t)) {
+  if (/payment|installment|installments|payment plan/.test(t)) {
     return 'payment_plan';
   }
 
-  if (/best block|which block|which .*block|block.*better|better.*block/.test(t)) {
-    return 'block_comparison';
-  }
-
-  if (/location|located|where is|where's|access|road|motorway|ring road/.test(t)) {
+  if (/location|located|where is|where's|access|road|motorway|ring road|thokar|multan road/.test(t)) {
     return 'location';
   }
 
-  if (/park view city/.test(t) && !/school|schools|mosque|mosques|commercial|amenities|\bpark\b|\bparks\b/.test(t.replace(/park view city/g, ''))) {
-    return 'unknown';
+  if (/approval|approved|lda|ruda|noc|legal|documentation/.test(t)) {
+    return 'approval';
   }
 
-  if (/school|schools|mosque|mosques|commercial|amenities|(?<!park )parks?\b/.test(t)) {
-    return 'amenities';
+  if (/gas|electricity|electric|voltage|water|sewerage|utility|utilities/.test(t)) {
+    return 'utilities';
   }
 
   return 'unknown';
 }
 
-function deterministicAnswer(intent) {
-  if (intent === 'availability') {
-    return "I don't have live Park View City inventory connected yet, so I don't want to give you inaccurate availability.";
+
+function deterministicAnswer(intent, lead = {}) {
+  const size = lead.property_size || '5 marla';
+  const budget = lead.budget || 'your budget';
+  const intentType = String(lead.intent || lead.customer_type || '').toLowerCase();
+
+  if (intent === 'living') {
+    return `For your ${size} house and ${budget} budget, I would compare Crystal and Diamond first, and keep Platinum as an option if the seller is negotiable or the property is clearly stronger. For living, I would prioritize the exact street, construction quality, road width, parking, development, possession and utility situation rather than choosing only by block name.`;
+  }
+
+  if (intent === 'resale') {
+    return `For resale, I would not guarantee that one Park View block is universally best. I would compare buyer demand, accessibility, development level, exact street, house condition and the asking price versus competing properties. A well-priced, well-located house can be more liquid than a similar property in a supposedly premium block.`;
+  }
+
+  if (intent === 'investment') {
+    return `For investment, I would compare entry price, possession, development, liquidity, seller discount, future demand and your intended holding period. I would not guarantee appreciation or ROI, and I would distinguish a short-term trade from a medium- or long-term investment.`;
+  }
+
+  if (intent === 'crystal') {
+    return `Crystal is worth considering for your ${size} house and ${budget} budget, but I would not call it universally the best block. The exact street, construction, possession, road width, parking, development and asking price should determine whether a specific property is a good buy.`;
+  }
+
+  if (intent === 'diamond') {
+    return `Diamond is worth comparing for your ${size} house and ${budget} budget. Current asking inventory can vary substantially within the block, so I would compare the specific house on street, construction, possession, location, utilities and seller negotiability rather than relying on the block name alone.`;
+  }
+
+  if (intent === 'platinum') {
+    return `Platinum is worth considering if the specific property justifies the price, but some current 5-marla asking stock is above a PKR 2 crore target. I would first check whether the seller is negotiable and whether the property's location, construction and other advantages justify stretching the budget.`;
   }
 
   if (intent === 'price') {
-    return "I don't have a live Park View City price feed connected yet, so I don't want to quote an outdated price.";
+    return `Current portal prices should be treated as asking prices, not confirmed sold prices. For a ${size} house around ${budget}, I would compare several fresh listings and adjust for exact street, construction, location, possession, utilities and seller motivation before judging whether the price is fair.`;
   }
 
-  if (intent === 'payment_plan') {
-    return "I don't have a verified current Park View City payment plan available yet, so I don't want to give you outdated figures.";
+  if (intent === 'utilities') {
+    return `Utilities need to be verified at the specific block and property level. In particular, I would not assume Sui gas is available throughout Park View City. Electricity, water, sewerage, gas and possession should be confirmed before making a buying decision.`;
+  }
+
+  if (intent === 'availability') {
+    return `Availability changes quickly and I would not invent or assume a live listing. If you want current options, we should check fresh inventory and then compare the actual properties against your ${size} and ${budget} requirements.`;
   }
 
   return null;
@@ -58,7 +142,7 @@ function deterministicAnswer(intent) {
 async function routeParkViewQuestion(message, lead = {}) {
   const intent = detectIntent(message);
 
-  const deterministic = deterministicAnswer(intent);
+  const deterministic = deterministicAnswer(intent, lead);
 
   if (deterministic) {
     return deterministic;

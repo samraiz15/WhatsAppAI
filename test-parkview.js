@@ -13,7 +13,7 @@ const { detectIntent, routeParkViewQuestion } = require('./router');
     ['What schools are there?', 'amenities'],
     ['Are there mosques?', 'amenities'],
     ['What commercial areas are there?', 'amenities'],
-    ['I want a 5 marla house in Park View City', 'unknown']
+    ['I want a 5 marla house in Park View City', 'property_search']
   ];
 
   for (const [query, expectedIntent] of tests) {
