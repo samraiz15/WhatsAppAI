@@ -360,7 +360,10 @@ function scorePropertyMatch(query, listing) {
   if (searchBlock && listingBlock !== searchBlock) return -1;
 
   if (searchBudget) {
-    const listingBudget = detectSearchBudget(text);
+    const listingBudget =
+      detectSearchBudget(text) ??
+      detectImplicitListingBudget(text);
+
     if (listingBudget === null || listingBudget > searchBudget) return -1;
   }
 
@@ -370,8 +373,13 @@ function scorePropertyMatch(query, listing) {
   if (searchBlock) score += 40;
 
   if (searchBudget) {
-    const listingBudget = detectSearchBudget(text);
-    score += 20 * (listingBudget / searchBudget);
+    const listingBudget =
+      detectSearchBudget(text) ??
+      detectImplicitListingBudget(text);
+
+    if (listingBudget !== null) {
+      score += 20 * (listingBudget / searchBudget);
+    }
   }
 
   return score;
@@ -394,9 +402,18 @@ function rankPropertySearchResults(query, results) {
       if (searchSize && listingSize !== searchSize) return null;
       if (searchType && !propertyTypeMatches(searchType, text)) return null;
 
-      const listingBudget = detectSearchBudget(text);
-      if (searchBudget !== null && (listingBudget === null || listingBudget > searchBudget)) return null;
-      if (match_score < 50) return null;
+      const listingBudget =
+        detectSearchBudget(text) ??
+        detectImplicitListingBudget(text);
+
+      if (
+        searchBudget !== null &&
+        (listingBudget === null || listingBudget > searchBudget)
+      ) {
+        return null;
+      }
+
+      if (match_score <= 0) return null;
 
       return { ...row, match_score, _originalIndex: originalIndex };
     })
