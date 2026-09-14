@@ -353,6 +353,12 @@ function propertyTypeMatches(searchType, listingText) {
   return false;
 }
 
+function isUnderBudgetSearch(text) {
+  return /\b(?:under|below|less\s+than|up\s+to|max(?:imum)?|within)\b/i.test(
+    String(text || '')
+  );
+}
+
 function scorePropertyMatch(query, listing) {
   const searchType = detectSearchPropertyType(query);
   const searchSize = detectSearchSize(query);
@@ -424,7 +430,23 @@ function rankPropertySearchResults(query, results) {
       return { ...row, match_score, _originalIndex: originalIndex };
     })
     .filter(Boolean)
-    .sort((a,b) => b.match_score - a.match_score || a._originalIndex - b._originalIndex)
+    .sort((a, b) => {
+      if (isUnderBudgetSearch(query)) {
+        const aBudget =
+          detectSearchBudget(a.message) ??
+          detectImplicitListingBudget(a.message);
+        const bBudget =
+          detectSearchBudget(b.message) ??
+          detectImplicitListingBudget(b.message);
+
+        if (aBudget !== null && bBudget !== null && aBudget !== bBudget) {
+          return aBudget - bBudget;
+        }
+      }
+
+      return b.match_score - a.match_score ||
+        a._originalIndex - b._originalIndex;
+    })
     .map(row => { const clean={...row}; delete clean._originalIndex; return clean; });
 }
 
