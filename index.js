@@ -231,7 +231,10 @@ const { version } = await fetchLatestWaWebVersion();
       const result = await processMessage(
         chatPhone,
         text.trim(),
-        { isOwner: normalizedPhone === ownerPhone }
+        {
+          isOwner: normalizedPhone === ownerPhone,
+          ownerPhone
+        }
       );
 
       console.log('AGENT:', result.reply);

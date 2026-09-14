@@ -452,6 +452,7 @@ function rankPropertySearchResults(query, results) {
 
 async function processMessage(phone, message, options = {}) {
   const isOwner = options.isOwner === true;
+  const ownerPhone = options.ownerPhone || phone;
   const text = String(message || '').trim();
 
   const ownerCommandMap = {
@@ -567,7 +568,7 @@ async function processMessage(phone, message, options = {}) {
     }
 
     const searchCandidates =
-      searchGroupMessages(phone, '', 500);
+      searchGroupMessages(ownerPhone, '', 500);
 
     const results =
       rankPropertySearchResults(searchText, searchCandidates)
