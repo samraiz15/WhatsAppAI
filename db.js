@@ -1,6 +1,6 @@
 const Database = require('better-sqlite3');
 
-const db = new Database('./agent.db');
+const db = new Database(process.env.WHATSAPPAI_DB_PATH || './agent.db');
 
 db.pragma('journal_mode = WAL');
 
@@ -61,6 +61,149 @@ if (!leadColumnNames.has('property_size')) {
 
 if (!leadColumnNames.has('budget_numeric')) {
   db.exec('ALTER TABLE leads ADD COLUMN budget_numeric INTEGER');
+}
+
+
+db.exec(`
+  CREATE TABLE IF NOT EXISTS whatsapp_messages (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    message_id TEXT NOT NULL UNIQUE,
+    remote_jid TEXT,
+    participant_jid TEXT,
+    from_me INTEGER NOT NULL DEFAULT 0,
+    message_type TEXT,
+    message_text TEXT,
+    message_timestamp INTEGER,
+    status TEXT NOT NULL DEFAULT 'received',
+    claimed_at TEXT,
+    error TEXT,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    processed_at TEXT
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_whatsapp_messages_remote
+  ON whatsapp_messages(remote_jid);
+
+  CREATE INDEX IF NOT EXISTS idx_whatsapp_messages_status
+  ON whatsapp_messages(status);
+`);
+
+const whatsappMessageColumns = db
+  .prepare('PRAGMA table_info(whatsapp_messages)')
+  .all()
+  .map(column => column.name);
+
+if (!whatsappMessageColumns.includes('claimed_at')) {
+  db.exec(`
+    ALTER TABLE whatsapp_messages
+    ADD COLUMN claimed_at TEXT
+  `);
+}
+
+const insertWhatsappMessageStmt = db.prepare(`
+  INSERT OR IGNORE INTO whatsapp_messages (
+    message_id,
+    remote_jid,
+    participant_jid,
+    from_me,
+    message_type,
+    message_text,
+    message_timestamp
+  )
+  VALUES (?, ?, ?, ?, ?, ?, ?)
+`);
+
+const getWhatsappMessageStmt = db.prepare(`
+  SELECT *
+  FROM whatsapp_messages
+  WHERE message_id = ?
+`);
+
+const claimWhatsappMessageStmt = db.prepare(`
+  UPDATE whatsapp_messages
+  SET status = 'processing',
+      claimed_at = CURRENT_TIMESTAMP,
+      error = NULL
+  WHERE message_id = ?
+    AND (
+      status IN ('received', 'failed')
+      OR (
+        status = 'processing'
+        AND (
+          claimed_at IS NULL
+          OR datetime(claimed_at) <= datetime('now', '-5 minutes')
+        )
+      )
+    )
+`);
+
+const completeWhatsappMessageStmt = db.prepare(`
+  UPDATE whatsapp_messages
+  SET status = 'processed',
+      claimed_at = NULL,
+      error = NULL,
+      processed_at = CURRENT_TIMESTAMP
+  WHERE message_id = ?
+    AND status = 'processing'
+`);
+
+const failWhatsappMessageStmt = db.prepare(`
+  UPDATE whatsapp_messages
+  SET status = 'failed',
+      claimed_at = NULL,
+      error = ?
+  WHERE message_id = ?
+    AND status = 'processing'
+`);
+
+function registerWhatsappMessage({
+  messageId,
+  remoteJid = null,
+  participantJid = null,
+  fromMe = false,
+  messageType = null,
+  messageText = null,
+  messageTimestamp = null
+}) {
+  const id = String(messageId || '').trim();
+
+  if (!id) {
+    throw new Error('messageId is required');
+  }
+
+  const result = insertWhatsappMessageStmt.run(
+    id,
+    remoteJid,
+    participantJid,
+    fromMe ? 1 : 0,
+    messageType,
+    messageText,
+    messageTimestamp
+  );
+
+  return {
+    inserted: result.changes === 1,
+    message: getWhatsappMessageStmt.get(id)
+  };
+}
+
+function claimWhatsappMessage(messageId) {
+  return claimWhatsappMessageStmt.run(
+    String(messageId || '').trim()
+  ).changes > 0;
+}
+
+function completeWhatsappMessage(messageId) {
+  return completeWhatsappMessageStmt.run(
+    String(messageId || '').trim()
+  ).changes > 0;
+}
+
+function failWhatsappMessage(messageId, error) {
+  return failWhatsappMessageStmt.run(
+    String(error || '').slice(0, 1000),
+    String(messageId || '').trim()
+  ).changes > 0;
 }
 
 const findLead = db.prepare(`
@@ -140,6 +283,7 @@ const saveGroupMessage = db.prepare(`
 const searchGroupMessagesStmt = db.prepare(`
   SELECT
     id,
+    group_jid,
     group_name,
     sender_phone,
     sender_name,
@@ -155,6 +299,7 @@ const searchGroupMessagesStmt = db.prepare(`
 const listGroupMessagesStmt = db.prepare(`
   SELECT
     id,
+    group_jid,
     group_name,
     sender_phone,
     sender_name,
@@ -209,4 +354,9 @@ module.exports = {
   addMessage,
   addGroupMessage,
   searchGroupMessages
+  ,
+  registerWhatsappMessage,
+  claimWhatsappMessage,
+  completeWhatsappMessage,
+  failWhatsappMessage
 };

@@ -5,12 +5,25 @@ db.exec(`
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     owner_phone TEXT NOT NULL,
     group_name TEXT NOT NULL,
+    group_jid TEXT,
     enabled INTEGER NOT NULL DEFAULT 1,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(owner_phone, group_name)
   );
 `);
+
+const monitoredGroupColumns = db
+  .prepare(`PRAGMA table_info(monitored_groups)`)
+  .all()
+  .map(column => column.name);
+
+if (!monitoredGroupColumns.includes('group_jid')) {
+  db.exec(`
+    ALTER TABLE monitored_groups
+    ADD COLUMN group_jid TEXT
+  `);
+}
 
 db.exec(`
   CREATE TABLE IF NOT EXISTS command_state (
@@ -57,11 +70,20 @@ const addGroupStmt = db.prepare(`
 `);
 
 const listGroupsStmt = db.prepare(`
-  SELECT id, group_name, enabled, created_at
+  SELECT id, group_jid, group_name, enabled, created_at
   FROM monitored_groups
   WHERE owner_phone = ?
     AND enabled = 1
   ORDER BY created_at ASC
+`);
+
+const setGroupJidStmt = db.prepare(`
+  UPDATE monitored_groups
+  SET group_jid = ?,
+      group_name = ?,
+      updated_at = CURRENT_TIMESTAMP
+  WHERE owner_phone = ?
+    AND id = ?
 `);
 
 const disableGroupStmt = db.prepare(`
@@ -81,15 +103,34 @@ function addMonitoredGroup(ownerPhone, groupName) {
 
   addGroupStmt.run(ownerPhone, name);
 
-  return {
-    owner_phone: ownerPhone,
-    group_name: name,
-    enabled: true
-  };
+  const group = db.prepare(`
+    SELECT id, owner_phone, group_jid, group_name, enabled, created_at
+    FROM monitored_groups
+    WHERE owner_phone = ?
+      AND group_name = ?
+  `).get(ownerPhone, name);
+
+  return group || null;
 }
 
 function getMonitoredGroups(ownerPhone) {
   return listGroupsStmt.all(ownerPhone);
+}
+
+function setMonitoredGroupJid(ownerPhone, groupId, groupJid, groupName) {
+  const jid = String(groupJid || '').trim();
+  const name = String(groupName || '').trim();
+
+  if (!ownerPhone || !groupId || !jid || !name) {
+    return false;
+  }
+
+  return setGroupJidStmt.run(
+    jid,
+    name,
+    ownerPhone,
+    groupId
+  ).changes > 0;
 }
 
 function disableMonitoredGroup(ownerPhone, groupName) {
@@ -102,6 +143,7 @@ function disableMonitoredGroup(ownerPhone, groupName) {
 module.exports = {
   addMonitoredGroup,
   getMonitoredGroups,
+  setMonitoredGroupJid,
   disableMonitoredGroup,
   setCommandState,
   getCommandState

@@ -8,28 +8,59 @@ const {
 
 const P = require('pino');
 const { processMessage } = require('./conversation');
-const { getMonitoredGroups } = require('./groups');
-const { addGroupMessage } = require('./db');
+const {
+  getMonitoredGroups,
+  setMonitoredGroupJid
+} = require('./groups');
+const { addGroupMessage, registerWhatsappMessage, claimWhatsappMessage, completeWhatsappMessage, failWhatsappMessage } = require('./db');
+const { extractMessageText } = require('./message-utils');
+const { classify, compactLog } = require('./ingestPolicy');
 
 const AUTH_DIR = './pairing-auth';
 
-let connectionState = 'closed';
+const CONNECTION_STATES = Object.freeze({
+  STARTING: 'STARTING',
+  CONNECTING: 'CONNECTING',
+  CONNECTED: 'CONNECTED',
+  DISCONNECTED: 'DISCONNECTED',
+  RECONNECTING: 'RECONNECTING',
+  LOGGED_OUT: 'LOGGED_OUT'
+});
+
+let connectionState = CONNECTION_STATES.DISCONNECTED;
 let startInProgress = false;
+let reconnectTimer = null;
 
 async function start() {
-  if (startInProgress || connectionState === 'open') {
+  if (startInProgress || connectionState === CONNECTION_STATES.CONNECTED) {
     return;
   }
 
   startInProgress = true;
-  connectionState = 'connecting';
 
-const { version } = await fetchLatestWaWebVersion();
+  if (connectionState !== CONNECTION_STATES.RECONNECTING) {
+    connectionState = CONNECTION_STATES.STARTING;
+  }
 
-  console.log('Using WA Web version:', version.join('.'));
+  console.log('Connection state:', connectionState);
 
-  const { state, saveCreds } =
-    await useMultiFileAuthState(AUTH_DIR);
+  let version;
+  let state;
+  let saveCreds;
+
+  try {
+    ({ version } = await fetchLatestWaWebVersion());
+
+    console.log('Using WA Web version:', version.join('.'));
+
+    ({ state, saveCreds } =
+      await useMultiFileAuthState(AUTH_DIR));
+  } catch (error) {
+    startInProgress = false;
+    connectionState = CONNECTION_STATES.DISCONNECTED;
+    console.error('START ERROR:', error.message);
+    throw error;
+  }
 
   const sock = makeWASocket({
     auth: state,
@@ -52,13 +83,25 @@ const { version } = await fetchLatestWaWebVersion();
       qrcode.generate(qr, { small: true });
     }
 
-    if (connection) {
-      connectionState = connection;
+    if (connection === 'open') {
+      connectionState = CONNECTION_STATES.CONNECTED;
+      startInProgress = false;
 
-      if (connection === 'open') {
-        startInProgress = false;
+      if (reconnectTimer) {
+        clearTimeout(reconnectTimer);
+        reconnectTimer = null;
       }
 
+      console.log('Connection:', connection, '| State:', connectionState);
+    }
+
+    if (connection === 'connecting') {
+      connectionState = CONNECTION_STATES.CONNECTING;
+      console.log('Connection:', connection, '| State:', connectionState);
+    }
+
+    if (connection === 'close') {
+      connectionState = CONNECTION_STATES.DISCONNECTED;
       console.log('Connection:', connection, '| State:', connectionState);
     }
 
@@ -74,20 +117,34 @@ const { version } = await fetchLatestWaWebVersion();
 
       if (code === DisconnectReason.connectionReplaced) {
         startInProgress = false;
-        connectionState = "closed";
-        console.log("CONNECTION REPLACED: stopping auto-reconnect");
+        connectionState = CONNECTION_STATES.DISCONNECTED;
+        console.log('CONNECTION REPLACED: stopping auto-reconnect');
         return;
       }
 
       if (code === DisconnectReason.loggedOut) {
+        startInProgress = false;
+        connectionState = CONNECTION_STATES.LOGGED_OUT;
         console.log('Logged out. Delete pairing-auth and pair again.');
+        return;
+      }
+
+      startInProgress = false;
+      connectionState = CONNECTION_STATES.RECONNECTING;
+
+      if (reconnectTimer) {
+        console.log('RECONNECT ALREADY SCHEDULED');
         return;
       }
 
       console.log('Connection ended. Restarting in 3 seconds...');
 
-      setTimeout(() => {
+      reconnectTimer = setTimeout(() => {
+        reconnectTimer = null;
+
         start().catch(error => {
+          startInProgress = false;
+          connectionState = CONNECTION_STATES.DISCONNECTED;
           console.error('Restart error:', error.message);
         });
       }, 3000);
@@ -95,14 +152,126 @@ const { version } = await fetchLatestWaWebVersion();
   });
 
   sock.ev.on('messages.upsert', async ({ messages, type }) => {
-    console.log('MESSAGE EVENT:', type, messages.length);
-    const message = messages[0];
-    console.log("RAW MESSAGE:", JSON.stringify(message, null, 2));
+    console.log(
+      'MESSAGE EVENT:',
+      type,
+      messages?.length || 0
+    );
 
-    if (!message?.message) return;
+    const nowSec = Math.floor(Date.now() / 1000);
+
+    for (const message of messages || []) {
+      console.log('INGEST:', compactLog(type, message, nowSec));
+
+      if (!message) {
+        console.log('MESSAGE SKIPPED: empty message');
+        continue;
+      }
+
+      const messageId = message.key?.id;
+
+      if (!messageId) {
+        console.log('MESSAGE SKIPPED: no message id');
+        continue;
+      }
+
+      const policy = classify(
+        {
+          ts: message.messageTimestamp,
+          fromMe: message.key?.fromMe === true,
+          isGroup: String(
+            message.key?.remoteJid ||
+            message.key?.remoteJidAlt ||
+            ''
+          ).endsWith('@g.us'),
+          upsertType: type
+        },
+        nowSec
+      );
+
+      console.log('INGEST POLICY:', messageId, policy);
+
+      if (!policy.ingest) {
+        console.log(
+          'MESSAGE INGEST SKIPPED:',
+          messageId,
+          policy.reason
+        );
+        continue;
+      }
+
+      console.log(
+        'RAW MESSAGE:',
+        JSON.stringify(message, null, 2)
+      );
+
+      if (!message?.message) {
+        console.log('MESSAGE SKIPPED: no message payload');
+        continue;
+      }
+
+    const messageType =
+      Object.keys(message.message || {})[0] || null;
+
+    const messageTextForLog =
+      message.message?.conversation ||
+      message.message?.extendedTextMessage?.text ||
+      message.message?.imageMessage?.caption ||
+      message.message?.videoMessage?.caption ||
+      message.message?.documentMessage?.caption ||
+      '';
+
+    try {
+      const registration = registerWhatsappMessage({
+        messageId,
+        remoteJid: message.key?.remoteJid || null,
+        participantJid:
+          message.key?.participantAlt ||
+          message.key?.participant ||
+          null,
+        fromMe: message.key?.fromMe === true,
+        messageType,
+        messageText: messageTextForLog || null,
+        messageTimestamp: Number(message.messageTimestamp || 0) || null
+      });
+
+      if (!registration.inserted) {
+        console.log('MESSAGE DUPLICATE SKIPPED:', messageId);
+        continue;
+      }
+
+      if (!claimWhatsappMessage(messageId)) {
+        console.log('MESSAGE CLAIM FAILED:', messageId);
+        continue;
+      }
+
+    } catch (error) {
+      console.error('MESSAGE IDEMPOTENCY ERROR:', error.message);
+      continue;
+    }
+
+    const isGroupMessage = String(
+      message.key?.remoteJid ||
+      message.key?.remoteJidAlt ||
+      ''
+    ).endsWith('@g.us');
+
+    if (!policy.reply && !isGroupMessage) {
+      console.log(
+        'DM HISTORY INGESTED WITHOUT REPLY:',
+        messageId,
+        policy.reason
+      );
+      completeWhatsappMessage(messageId);
+      continue;
+    }
+
     const phone = message.key.remoteJidAlt || message.key.remoteJid;
 
-    if (!phone) return;
+    if (!phone) {
+      completeWhatsappMessage(messageId);
+      continue;
+    }
 
     const ownerId = sock.user?.id || '';
     const ownerNumber = ownerId.split(':')[0].split('@')[0];
@@ -112,33 +281,28 @@ const { version } = await fetchLatestWaWebVersion();
 
     const normalizedPhone = phone.replace('@lid', '@s.whatsapp.net');
 
-    if (message.key.fromMe && !ownerPhone) return;
+    if (message.key.fromMe && !ownerPhone) {
+      completeWhatsappMessage(messageId);
+      continue;
+    }
 
-    const textPreview =
-      message.message?.conversation ||
-      message.message?.extendedTextMessage?.text ||
-      message.message?.imageMessage?.caption ||
-      message.message?.videoMessage?.caption ||
-      message.message?.documentMessage?.caption ||
-      '';
+    const textPreview = extractMessageText(message.message);
 
     const ownerCommand =
       /^(list|add group|remove group|groups|search|leads|parkview|status)$/i.test(
         String(textPreview || '').trim()
       );
 
-    if (message.key.fromMe && type !== 'notify') {
-      return;
-    }
-
     if (ownerCommand && normalizedPhone !== ownerPhone) {
       console.log('COMMAND BLOCKED: unauthorized number', phone);
-      return;
+      completeWhatsappMessage(messageId);
+      continue;
     }
 
     if (normalizedPhone !== ownerPhone && !phone.endsWith('@g.us')) {
       console.log('CONTACT CHAT BLOCKED:', phone);
-      return;
+      completeWhatsappMessage(messageId);
+      continue;
     }
 
     if (phone.endsWith('@g.us')) {
@@ -150,14 +314,22 @@ const { version } = await fetchLatestWaWebVersion();
 
       if (!ownerPhone) {
         console.log('GROUP SKIPPED: owner identity unavailable');
-        return;
+        completeWhatsappMessage(messageId);
+        continue;
       }
 
       const monitoredGroups = getMonitoredGroups(ownerPhone);
 
+      console.log('GROUP OWNER DEBUG:', {
+        ownerPhone,
+        remoteJid: phone,
+        monitoredGroups
+      });
+
       if (!monitoredGroups.length) {
         console.log('GROUP SKIPPED: no monitored groups configured');
-        return;
+        completeWhatsappMessage(messageId);
+        continue;
       }
 
       let groupMetadata;
@@ -166,37 +338,93 @@ const { version } = await fetchLatestWaWebVersion();
         groupMetadata = await sock.groupMetadata(phone);
       } catch (error) {
         console.error('GROUP METADATA ERROR:', error.message);
-        return;
+        failWhatsappMessage(messageId, error.message);
+        continue;
       }
 
-      const monitoredGroup = monitoredGroups.find(
-        group => group.group_name.toLowerCase() ===
-          String(groupMetadata.subject || '').trim().toLowerCase()
+      const normalizeGroupName = (name) =>
+        String(name || '')
+          .normalize('NFKC')
+          .replace(/\s+/g, ' ')
+          .trim()
+          .toLowerCase();
+
+      const whatsappGroupName = normalizeGroupName(groupMetadata.subject);
+
+      let monitoredGroup = monitoredGroups.find(
+        group => group.group_jid === phone
       );
+
+      if (monitoredGroup) {
+        const currentGroupName = String(groupMetadata.subject || '').trim();
+
+        if (
+          currentGroupName &&
+          currentGroupName !== monitoredGroup.group_name
+        ) {
+          const updated = setMonitoredGroupJid(
+            ownerPhone,
+            monitoredGroup.id,
+            phone,
+            currentGroupName
+          );
+
+          if (updated) {
+            console.log(
+              'GROUP NAME UPDATED:',
+              monitoredGroup.group_name,
+              '=>',
+              currentGroupName
+            );
+
+            monitoredGroup = {
+              ...monitoredGroup,
+              group_name: currentGroupName
+            };
+          }
+        }
+      }
+
+      if (!monitoredGroup) {
+        monitoredGroup = monitoredGroups.find(
+          group =>
+            normalizeGroupName(group.group_name) === whatsappGroupName
+        );
+
+        if (monitoredGroup) {
+          const linked = setMonitoredGroupJid(
+            ownerPhone,
+            monitoredGroup.id,
+            phone,
+            groupMetadata.subject
+          );
+
+          if (linked) {
+            console.log(
+              'GROUP JID LINKED:',
+              monitoredGroup.group_name,
+              '=>',
+              phone
+            );
+          }
+        }
+      }
 
       if (!monitoredGroup) {
         console.log('GROUP SKIPPED:', groupMetadata.subject || phone);
-        return;
+        completeWhatsappMessage(messageId);
+        continue;
       }
 
       console.log('MONITORED GROUP:', groupMetadata.subject);
       console.log('GROUP MESSAGE:', JSON.stringify(message, null, 2));
 
-      const groupText =
-        message.message?.conversation ||
-        message.message?.extendedTextMessage?.text ||
-        message.message?.imageMessage?.caption ||
-        message.message?.videoMessage?.caption ||
-        message.message?.documentMessage?.caption ||
-        message.message?.ephemeralMessage?.message?.conversation ||
-        message.message?.ephemeralMessage?.message?.extendedTextMessage?.text ||
-        message.message?.viewOnceMessage?.message?.conversation ||
-        message.message?.viewOnceMessage?.message?.extendedTextMessage?.text ||
-        '';
+      const groupText = extractMessageText(message.message);
 
       if (!groupText.trim()) {
         console.log('GROUP MESSAGE SKIPPED: no text');
-        return;
+        completeWhatsappMessage(messageId);
+        continue;
       }
 
       const senderPhone =
@@ -214,14 +442,16 @@ const { version } = await fetchLatestWaWebVersion();
       );
 
       console.log('GROUP MESSAGE SAVED:', groupMetadata.subject);
-      return;
+      completeWhatsappMessage(messageId);
+      continue;
     }
 
-    const text = message.message?.conversation || message.message?.extendedTextMessage?.text || message.message?.imageMessage?.caption || message.message?.videoMessage?.caption || message.message?.documentMessage?.caption || message.message?.ephemeralMessage?.message?.conversation || message.message?.ephemeralMessage?.message?.extendedTextMessage?.text || message.message?.viewOnceMessage?.message?.conversation || message.message?.viewOnceMessage?.message?.extendedTextMessage?.text;
+    const text = extractMessageText(message.message);
 
     if (!text?.trim()) {
       console.log("MESSAGE TYPE:", Object.keys(message.message || {}));
-      return;
+      completeWhatsappMessage(messageId);
+      continue;
     }
 
     console.log('\nUSER:', text);
@@ -249,21 +479,30 @@ const { version } = await fetchLatestWaWebVersion();
 
       if (!result.reply) {
         console.log('NO REPLY NEEDED');
-        return;
+        completeWhatsappMessage(messageId);
+        continue;
       }
 
       await sock.sendMessage(phone, {
         text: result.reply
       });
 
+      completeWhatsappMessage(messageId);
+
       console.log('SENT');
     } catch (error) {
       console.error('Message error:', error.message);
 
-      await sock.sendMessage(phone, {
-        text: 'Sorry, something went wrong. Please try again.'
-      });
+      failWhatsappMessage(messageId, error.message);
+
+      if (policy.reply) {
+        await sock.sendMessage(phone, {
+          text: 'Sorry, something went wrong. Please try again.'
+        });
+      }
     }
+    }
+
   });
 }
 

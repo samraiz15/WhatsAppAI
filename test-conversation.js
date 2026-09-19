@@ -1,7 +1,9 @@
 ﻿const fs = require('fs');
 const assert = require('assert');
 
-for (const file of ['agent.db', 'agent.db-shm', 'agent.db-wal']) {
+process.env.WHATSAPPAI_DB_PATH = './agent.test.db';
+
+for (const file of ['agent.test.db', 'agent.test.db-shm', 'agent.test.db-wal']) {
   if (fs.existsSync(file)) fs.unlinkSync(file);
 }
 

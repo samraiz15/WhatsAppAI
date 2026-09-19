@@ -225,12 +225,8 @@ You can also simply ask me normally.`;
 function normalizePropertyText(value) {
   return String(value || '')
     .toLowerCase()
-    .replace(/\b5\s*-?\s*m(?:arla)?\b/g, '5 marla')
-    .replace(/\b10\s*-?\s*m(?:arla)?\b/g, '10 marla')
-    .replace(/\b7\s*-?\s*m(?:arla)?\b/g, '7 marla')
-    .replace(/\b3\.5\s*-?\s*m(?:arla)?\b/g, '3.5 marla')
-    .replace(/\b15\s*-?\s*m(?:arla)?\b/g, '15 marla')
-    .replace(/\b20\s*-?\s*m(?:arla)?\b/g, '20 marla')
+    .replace(/\b(3\.5|5|7|10|15|20)\s*-?\s*m(?:arla)?\b/g, '$1 marla')
+    .replace(/\b(1|2)\s*-?\s*k(?:anal)?\b/g, '$1 kanal')
     .replace(/\s+/g, ' ')
     .trim();
 }
@@ -397,22 +393,143 @@ function scorePropertyMatch(query, listing) {
   return score;
 }
 
+
+function extractPropertyCandidates(message) {
+  const raw = String(message || '')
+    .replace(/\r\n/g, '\n')
+    .replace(/\uFFFD/g, '')
+    .trim();
+
+  if (!raw) return [];
+
+  const lines = raw
+    .split('\n')
+    .map(line => line.trim())
+    .filter(Boolean);
+
+  if (!lines.length) return [];
+
+  const candidates = [];
+  let current = [];
+
+  const numberedListingRegex =
+    /^\s*(?:plot\s*)?#?\d{1,6}[.,:]?\s+/i;
+
+  const propertyStartRegex =
+    /\b(?:plot|plots|house|home|villa|bungalow|apartment|flat|shop|office|building|plaza|tower|land|parcel|portion)\b/i;
+
+  const propertySizeRegex =
+    /\b(?:3\.5|5|7|10|15|20)\s*-?\s*(?:marla|m)\b|\b(?:1|2)\s*-?\s*(?:kanal|k)\b/i;
+
+  const blockRegex =
+    /\b(?:crystal extension|tulip extension|tulip overseas|silver block|platinum block|crystal block|pearl block|diamond block|imperial block|overseas block|silver|platinum|crystal|tulip|diamond|pearl)\b/i;
+
+  const listingMarkerRegex =
+    /\b(?:for sale|for rent|available|demand|offer required|transfer free|full paid|half paid|all dues clear|possession)\b/i;
+
+  const flush = () => {
+    if (!current.length) return;
+
+    const text = current.join('\n').trim();
+
+    if (text) {
+      candidates.push({
+        text,
+        lines: [...current]
+      });
+    }
+
+    current = [];
+  };
+
+  for (const line of lines) {
+    const startsNumberedListing =
+      numberedListingRegex.test(line) &&
+      (
+        propertySizeRegex.test(line) ||
+        propertyStartRegex.test(line) ||
+        blockRegex.test(line)
+      );
+
+    const startsPropertyListing =
+      current.length > 0 &&
+      (
+        startsNumberedListing ||
+        (
+          propertySizeRegex.test(line) &&
+          (
+            blockRegex.test(line) ||
+            listingMarkerRegex.test(line) ||
+            propertyStartRegex.test(line)
+          )
+        )
+      );
+
+    if (startsPropertyListing) {
+      flush();
+    }
+
+    current.push(line);
+  }
+
+  flush();
+
+  return candidates;
+}
+
 function rankPropertySearchResults(query, results) {
   const searchBudget = detectSearchBudget(query);
   const searchBlock = detectSearchBlock(query);
   const searchType = detectSearchPropertyType(query);
   const searchSize = detectSearchSize(query);
 
-  return results
+  const candidates = [];
+
+  for (const row of results) {
+    const sections = extractPropertyCandidates(row.message);
+
+    const usableSections = sections.length
+      ? sections
+      : [{
+          text: row.message,
+          lines: String(row.message || '').split('\n')
+        }];
+
+    for (const section of usableSections) {
+      candidates.push({
+        ...row,
+        message: section.text,
+        originalMessage: row.message,
+        propertySection: section.text
+      });
+    }
+  }
+
+  return candidates
     .map((row, originalIndex) => {
       const text = normalizePropertyText(row.message);
       const listingBlock = detectSearchBlock(text);
       const listingSize = detectSearchSize(text);
-      const match_score = scorePropertyMatch(query, row);
 
-      if (searchBlock && listingBlock !== searchBlock) return null;
-      if (searchSize && listingSize !== searchSize) return null;
-      if (searchType && !propertyTypeMatches(searchType, text)) return null;
+      const match_score = scorePropertyMatch(query, {
+        ...row,
+        message: text
+      });
+
+      if (searchBlock && listingBlock !== searchBlock) {
+        return null;
+      }
+
+      if (searchSize && listingSize !== searchSize) {
+        return null;
+      }
+
+      if (
+        searchType &&
+        !propertyTypeMatches(searchType, text)
+      ) {
+        return null;
+      }
 
       const listingBudget =
         detectSearchBudget(text) ??
@@ -420,14 +537,23 @@ function rankPropertySearchResults(query, results) {
 
       if (
         searchBudget !== null &&
-        (listingBudget === null || listingBudget > searchBudget)
+        (
+          listingBudget === null ||
+          listingBudget > searchBudget
+        )
       ) {
         return null;
       }
 
-      if (match_score <= 0) return null;
+      if (match_score <= 0) {
+        return null;
+      }
 
-      return { ...row, match_score, _originalIndex: originalIndex };
+      return {
+        ...row,
+        match_score,
+        _originalIndex: originalIndex
+      };
     })
     .filter(Boolean)
     .sort((a, b) => {
@@ -435,20 +561,32 @@ function rankPropertySearchResults(query, results) {
         const aBudget =
           detectSearchBudget(a.message) ??
           detectImplicitListingBudget(a.message);
+
         const bBudget =
           detectSearchBudget(b.message) ??
           detectImplicitListingBudget(b.message);
 
-        if (aBudget !== null && bBudget !== null && aBudget !== bBudget) {
+        if (
+          aBudget !== null &&
+          bBudget !== null &&
+          aBudget !== bBudget
+        ) {
           return aBudget - bBudget;
         }
       }
 
-      return b.match_score - a.match_score ||
-        a._originalIndex - b._originalIndex;
+      return (
+        b.match_score - a.match_score ||
+        a._originalIndex - b._originalIndex
+      );
     })
-    .map(row => { const clean={...row}; delete clean._originalIndex; return clean; });
+    .map(row => {
+      const clean = { ...row };
+      delete clean._originalIndex;
+      return clean;
+    });
 }
+
 
 async function processMessage(phone, message, options = {}) {
   const isOwner = options.isOwner === true;
@@ -589,7 +727,7 @@ async function processMessage(phone, message, options = {}) {
           row.sender_name ||
           "Unknown sender";
 
-        const phone =
+        const senderPhone =
           String(row.sender_phone || "")
             .split("@")[0]
             .split(":")[0]
@@ -611,7 +749,7 @@ async function processMessage(phone, message, options = {}) {
 
         return (
           `${index + 1}️⃣ ${sender}\n` +
-          (phone ? `📞 ${phone}\n` : "") +
+          (senderPhone ? "PHONE: " + senderPhone + "\n" : "") +
           shortened
         );
       });
@@ -726,7 +864,10 @@ async function processMessage(phone, message, options = {}) {
     const groups = getMonitoredGroups(phone);
 
     const reply = groups.length
-      ? "Monitored WhatsApp Groups\n\n" + groups.map((group, i) => `${i + 1}. ${group.group_name}`).join("\n")
+      ? "Monitored WhatsApp Groups\n\n" +
+        groups.map((group, i) =>
+          `${i + 1}. ${group.group_name}${group.group_jid ? " ✓ linked" : " — waiting for first message"}`
+        ).join("\n")
       : "No monitored WhatsApp groups yet.";
 
     addMessage(phone, "incoming", message);
@@ -932,6 +1073,7 @@ module.exports = {
   parseBudgetNumeric,
   normalizePropertyText,
   detectSearchPropertyType,
+  detectSearchBlock,
   detectSearchSize,
   detectSearchBudget,
   propertyTypeMatches,
