@@ -13,7 +13,7 @@ const {
   setMonitoredGroupJid
 } = require('./groups');
 const { addGroupMessage, registerWhatsappMessage, claimWhatsappMessage, completeWhatsappMessage, failWhatsappMessage } = require('./db');
-const { extractMessageText } = require('./message-utils');
+const { extractMessageText, safeLogValue } = require('./message-utils');
 const { classify, compactLog } = require('./ingestPolicy');
 
 const AUTH_DIR = './pairing-auth';
@@ -202,7 +202,7 @@ async function start() {
 
       console.log(
         'RAW MESSAGE:',
-        JSON.stringify(message, null, 2)
+        safeLogValue(message)
       );
 
       if (!message?.message) {

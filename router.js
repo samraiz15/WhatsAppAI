@@ -11,6 +11,10 @@ function detectIntent(message) {
     return 'property_search';
   }
 
+  if (/\b(?:approval|approved|lda|ruda|noc|legal|documentation|title|transfer|possession)\b/.test(t)) {
+    return 'approval';
+  }
+
   if (
     /\b(resale|resell|sell later|selling later|exit)\b/.test(t) &&
     /\b(which|what|better|best|block)\b/.test(t)
@@ -140,7 +144,24 @@ function deterministicAnswer(intent, lead = {}) {
 }
 
 async function routeParkViewQuestion(message, lead = {}) {
-  const intent = detectIntent(message);
+  const text = String(message || '');
+  const intent = detectIntent(text);
+
+  const lower = text.toLowerCase();
+
+  if (
+    intent === 'approval' &&
+    /\b(?:approved|approval|noc|lda|ruda|legal|documentation)\b/i.test(lower)
+  ) {
+    return 'Approval and NOC status must be checked for the exact block, project and authority. Please tell me which block or project you mean and whether you are asking about LDA, RUDA, transfer/building eligibility, or final NOC status. I need the exact current source before I can answer that confidently.';
+  }
+
+  if (
+    /\b(?:price|prices|rate|rates|cost|costs|how much|current price)\b/i.test(lower) &&
+    /\b(?:park view|parkview|jade|jasmine|sapphire|tulip|imperial|executive|crystal|diamond|platinum)\b/i.test(lower)
+  ) {
+    return 'Current price needs confirmation. I do not have a verified current figure for that exact block and product, and current Park View pricing is time-sensitive.';
+  }
 
   const deterministic = deterministicAnswer(intent, lead);
 

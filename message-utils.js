@@ -57,8 +57,59 @@ function getMessageType(message) {
   return keys.length ? keys[0] : null;
 }
 
+function isSensitiveKey(name) {
+  const key = String(name || '').toLowerCase();
+
+  return /rootkey|privkey|privatekey|remoteidentitykey|session|secret|token|password|cookie|auth|authorization|apikey|api_key|keymaterial|encryption|sessionkey|accesskey|refreshkey/i.test(key);
+}
+
+function safeLogValue(value, seen = new WeakSet()) {
+  if (value === null || value === undefined) {
+    return 'null';
+  }
+
+  if (typeof value === 'string') {
+    return value.slice(0, 300);
+  }
+
+  if (typeof value === 'number' || typeof value === 'boolean' || typeof value === 'bigint') {
+    return String(value);
+  }
+
+  if (typeof value === 'function') {
+    return '[Function]';
+  }
+
+  if (typeof value === 'object') {
+    if (seen.has(value)) {
+      return '[Circular]';
+    }
+
+    seen.add(value);
+
+    if (Array.isArray(value)) {
+      return `[${value.map(item => safeLogValue(item, seen)).join(', ')}]`;
+    }
+
+    const out = {};
+
+    for (const [key, entry] of Object.entries(value)) {
+      if (isSensitiveKey(key)) {
+        continue;
+      }
+
+      out[key] = safeLogValue(entry, seen);
+    }
+
+    return JSON.stringify(out).slice(0, 1500);
+  }
+
+  return String(value);
+}
+
 module.exports = {
   unwrapMessage,
   extractMessageText,
-  getMessageType
+  getMessageType,
+  safeLogValue
 };
