@@ -1,5 +1,5 @@
 const { askOllama } = require('./ollama');
-const { getParkViewContext } = require('./parkview_knowledge');
+const { getParkViewContext, getParkViewKnowledgeAnswer } = require('./parkview_knowledge');
 
 function detectIntent(message) {
   const t = String(message || '').toLowerCase().trim();
@@ -125,7 +125,7 @@ function deterministicAnswer(intent, lead = {}) {
   }
 
   if (intent === 'platinum') {
-    return `Platinum is worth considering if the specific property justifies the price, but some current 5-marla asking stock is above a PKR 2 crore target. I would first check whether the seller is negotiable and whether the property's location, construction and other advantages justify stretching the budget.`;
+    return `Platinum can be compared with other blocks, but I do not have a verified current price or availability record for a specific property. I would compare the exact property's location, construction, possession, utilities and documented asking price before judging it.`;
   }
 
   if (intent === 'price') {
@@ -146,6 +146,11 @@ function deterministicAnswer(intent, lead = {}) {
 async function routeParkViewQuestion(message, lead = {}) {
   const text = String(message || '');
   const intent = detectIntent(text);
+
+  const knowledgeAnswer = getParkViewKnowledgeAnswer(text, lead);
+  if (knowledgeAnswer) {
+    return knowledgeAnswer;
+  }
 
   const lower = text.toLowerCase();
 
@@ -169,32 +174,39 @@ async function routeParkViewQuestion(message, lead = {}) {
     return deterministic;
   }
 
+  if (
+    intent === 'unknown' &&
+    /park\s*view|parkview|block|approval|approved|noc|lda|ruda|price|availability|possession|development|transfer|title|house|plot|amenities|location|utility|gas|electricity|water/i.test(lower)
+  ) {
+    return 'I do not have a verified source for that specific Park View/property question. Please provide the exact project, block, property type or authority so the answer can remain properly scoped.';
+  }
+
   const context = getParkViewContext(message, 1400);
 
   if (intent === 'location') {
-    return "Park View City Lahore is located on Main Multan Road, approximately 3 km from Thokar Niaz Baig. It also has access toward Canal Road, M-2 Motorway and Lahore Ring Road.";
+    return 'I do not have a dated source record available for a current location or access claim. Please verify the project location and route against a current official map or authority record.';
   }
 
   if (intent === 'amenities') {
     const t = String(message || '').toLowerCase();
 
     if (/school|schools/.test(t)) {
-      return "Park View City Lahore has school/educational facilities referenced in project material, including an international school. Exact operating status and current availability should be verified.";
+      return "I do not have a dated source record for current school operations or availability. Please verify the exact facility and block from current project information.";
     }
 
     if (/mosque|mosques/.test(t)) {
-      return "Park View City Lahore has mosque facilities referenced in project material, including the Grand Jamia Mosque. Exact operating status and location should be verified for the current period.";
+      return "I do not have a dated source record for current mosque operations or exact location. Please verify the facility against current project information.";
     }
 
     if (/commercial/.test(t)) {
-      return "Park View City Lahore has commercial areas referenced in project material, including commercial markaz and retail facilities. Exact current availability should be verified.";
+      return "I do not have a dated source record for current commercial availability. Please verify the exact area and operating status from current project information.";
     }
 
     if (/park|parks|green|recreational/.test(t)) {
-      return "Yes. Park View City Lahore references parks and green areas, including Central Park, along with jogging/cycling facilities in project material. Exact availability and operating status should be verified.";
+      return "I do not have a dated source record for current park or recreational-facility status. Please verify the exact facility and operating status from current project information.";
     }
 
-    return "Park View City Lahore commonly references parks and green areas, mosques, commercial areas, schools, medical facilities, recreational areas, utilities and security facilities. Exact availability and operating status should be verified for the current period.";
+    return "I do not have dated source records for current amenities or operating status. Please specify the facility and block so the answer can remain properly scoped.";
   }
 
   if (intent === 'block_comparison') {
