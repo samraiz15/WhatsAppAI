@@ -15,6 +15,7 @@ const {
 const { addGroupMessage, registerWhatsappMessage, claimWhatsappMessage, completeWhatsappMessage, failWhatsappMessage } = require('./db');
 const { extractMessageText, safeLogValue } = require('./message-utils');
 const { classify, compactLog } = require('./ingestPolicy');
+const demoConfig = require('./demo-config');
 
 const AUTH_DIR = './pairing-auth';
 
@@ -30,6 +31,29 @@ const CONNECTION_STATES = Object.freeze({
 let connectionState = CONNECTION_STATES.DISCONNECTED;
 let startInProgress = false;
 let reconnectTimer = null;
+
+const messageRateState = new Map();
+
+function isRateLimited(phone) {
+  if (!demoConfig.demoMode) return false;
+
+  const now = Date.now();
+  const windowMs = 60 * 1000;
+  const timestamps = messageRateState.get(phone) || [];
+
+  const recent = timestamps.filter(
+    timestamp => now - timestamp < windowMs
+  );
+
+  if (recent.length >= demoConfig.maxMessagesPerMinute) {
+    messageRateState.set(phone, recent);
+    return true;
+  }
+
+  recent.push(now);
+  messageRateState.set(phone, recent);
+  return false;
+}
 
 async function start() {
   if (startInProgress || connectionState === CONNECTION_STATES.CONNECTED) {
@@ -451,6 +475,37 @@ async function start() {
     if (!text?.trim()) {
       console.log("MESSAGE TYPE:", Object.keys(message.message || {}));
       completeWhatsappMessage(messageId);
+      continue;
+    }
+
+    if (
+      demoConfig.demoMode &&
+      text.length > demoConfig.maxMessageLength
+    ) {
+      console.log(
+        'DEMO MESSAGE TOO LONG:',
+        messageId,
+        text.length
+      );
+
+      completeWhatsappMessage(messageId);
+
+      await sock.sendMessage(phone, {
+        text: 'Your message is too long. Please send a shorter message.'
+      });
+
+      continue;
+    }
+
+    if (demoConfig.demoMode && isRateLimited(phone)) {
+      console.log('DEMO RATE LIMIT:', phone);
+
+      completeWhatsappMessage(messageId);
+
+      await sock.sendMessage(phone, {
+        text: 'You have reached the demo message limit. Please try again in a minute.'
+      });
+
       continue;
     }
 
