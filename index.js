@@ -329,6 +329,13 @@ async function start() {
         String(textPreview || '').trim()
       );
 
+    console.log('OWNER DEBUG:', {
+      phone,
+      normalizedPhone,
+      ownerPhone,
+      textPreview
+    });
+
     if (ownerCommand && normalizedPhone !== ownerPhone) {
       console.log('COMMAND BLOCKED: unauthorized number', phone);
       completeWhatsappMessage(messageId);
