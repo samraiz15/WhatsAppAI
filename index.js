@@ -335,7 +335,15 @@ async function start() {
       continue;
     }
 
-    if (normalizedPhone !== ownerPhone && !phone.endsWith('@g.us')) {
+    // During the demo window, allow all individual WhatsApp contacts.
+    // Owner-only commands remain protected above.
+    if (
+      demoConfig.demoMode &&
+      isDemoActive() &&
+      !phone.endsWith('@g.us')
+    ) {
+      console.log('DEMO CONTACT ALLOWED:', normalizedPhone);
+    } else if (normalizedPhone !== ownerPhone && !phone.endsWith('@g.us')) {
       console.log('CONTACT CHAT BLOCKED:', phone);
       completeWhatsappMessage(messageId);
       continue;
