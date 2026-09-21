@@ -63,6 +63,32 @@ async function testLeadConversation() {
   console.log('PASS: lead conversation regression');
 }
 
+async function testNameDetection() {
+  const cases = [
+    ['+923009999991', 'My name is Rajpoot', 'Rajpoot'],
+    ['+923009999992', 'I am Rajpoot', 'Rajpoot'],
+    ['+923009999993', "I'm Rajpoot", 'Rajpoot'],
+    ['+923009999994', 'This is Rajpoot', 'Rajpoot'],
+    ['+923009999995', 'Rajpoot', null],
+    ['+923009999996', 'Platinum', null],
+    ['+923009999997', '5 marla', null],
+    ['+923009999998', 'DHA Lahore', null],
+    ['+923009999990', '2 crore', null]
+  ];
+
+  for (const [phone, message, expectedName] of cases) {
+    const result = await processMessage(phone, message);
+
+    assert.strictEqual(
+      result.lead.name,
+      expectedName,
+      `Unexpected name detection for "${message}"`
+    );
+  }
+
+  console.log('PASS: name detection regression');
+}
+
 function testPropertyParsing() {
   assert.strictEqual(detectInterest('I need a house'), 'House');
   assert.strictEqual(detectPropertySize('I want a 5 marla house'), '5 marla');
@@ -113,6 +139,7 @@ async function main() {
   testPropertyParsing();
   testSearchParsing();
   await testLeadConversation();
+  await testNameDetection();
 
   console.log('\nCONVERSATION TESTS: 100% PASSED');
 }
