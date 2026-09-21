@@ -336,7 +336,11 @@ async function start() {
       textPreview
     });
 
-    if (ownerCommand && normalizedPhone !== ownerPhone) {
+    if (
+      ownerCommand &&
+      normalizedPhone !== ownerPhone &&
+      !(demoConfig.demoMode && isDemoActive())
+    ) {
       console.log('COMMAND BLOCKED: unauthorized number', phone);
       completeWhatsappMessage(messageId);
       continue;
