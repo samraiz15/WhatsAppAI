@@ -215,6 +215,9 @@ async function start() {
         {
           ts: message.messageTimestamp,
           fromMe: message.key?.fromMe === true,
+          text: extractMessageText(message.message),
+          demoMode: demoConfig.demoMode,
+          demoActive: demoConfig.demoMode && isDemoActive(),
           isGroup: String(
             message.key?.remoteJid ||
             message.key?.remoteJidAlt ||

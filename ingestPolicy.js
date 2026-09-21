@@ -46,7 +46,15 @@ function classify(input, nowSec, cfg) {
     return no('future_timestamp');
   }
 
-  if (input.fromMe) {
+  const ownerCommand =
+    /^(list|add group|remove group|groups|search|leads|parkview|status)$/i.test(
+      String(input.text || '').trim()
+    );
+
+  if (
+    input.fromMe &&
+    !(input.demoMode && input.demoActive && ownerCommand)
+  ) {
     return no('from_me');
   }
 
