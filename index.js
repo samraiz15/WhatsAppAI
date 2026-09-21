@@ -34,6 +34,18 @@ let reconnectTimer = null;
 
 const messageRateState = new Map();
 
+function isDemoActive() {
+  if (!demoConfig.demoMode) return true;
+
+  const start = new Date(demoConfig.demoStart).getTime();
+  const durationMs = demoConfig.demoDurationDays * 24 * 60 * 60 * 1000;
+  const now = Date.now();
+
+  return Number.isFinite(start) &&
+    now >= start &&
+    now < start + durationMs;
+}
+
 function isRateLimited(phone) {
   if (!demoConfig.demoMode) return false;
 
@@ -494,6 +506,12 @@ async function start() {
         text: 'Your message is too long. Please send a shorter message.'
       });
 
+      continue;
+    }
+
+    if (demoConfig.demoMode && !isDemoActive()) {
+      console.log('DEMO WINDOW EXPIRED:', phone);
+      completeWhatsappMessage(messageId);
       continue;
     }
 
