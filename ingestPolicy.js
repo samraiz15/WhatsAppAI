@@ -51,9 +51,11 @@ function classify(input, nowSec, cfg) {
       String(input.text || '').trim()
     );
 
+  // During the demo window, allow owner-originated messages through ingest.
+  // processMessage() still decides whether non-command owner text is ignored.
   if (
     input.fromMe &&
-    !(input.demoMode && input.demoActive && ownerCommand)
+    !(input.demoMode && input.demoActive)
   ) {
     return no('from_me');
   }
