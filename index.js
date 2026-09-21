@@ -239,6 +239,14 @@ async function start() {
         continue;
       }
 
+      // Bot's own outgoing messages may pass demo ingest so they can be
+      // recorded, but they must never be fed back into processMessage().
+      if (message.key?.fromMe === true) {
+        console.log('BOT MESSAGE SKIPPED FROM PROCESSING:', messageId);
+        completeWhatsappMessage(messageId);
+        continue;
+      }
+
       console.log(
         'RAW MESSAGE:',
         safeLogValue(message)
