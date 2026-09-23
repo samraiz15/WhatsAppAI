@@ -21,7 +21,8 @@ assert.strictEqual(
 assert.strictEqual(
   isFollowUpDue({
     phone: '+923009999999',
-    followup_days: 1
+    followup_days: 1,
+    followup_started_at: '2026-09-23T12:00:00Z'
   }, new Date('2026-09-24T12:00:00Z')),
   true
 );
@@ -29,8 +30,17 @@ assert.strictEqual(
 assert.strictEqual(
   isFollowUpDue({
     phone: '+923009999999',
-    followup_days: 1
+    followup_days: 1,
+    followup_started_at: '2026-09-23T12:00:00Z'
   }, new Date('2026-09-23T12:00:00Z')),
+  false
+);
+
+assert.strictEqual(
+  isFollowUpDue({
+    phone: '+923009999999',
+    followup_days: 1
+  }, new Date('2026-09-24T12:00:00Z')),
   false
 );
 

@@ -1,3 +1,4 @@
+const { getFollowUpDueAt } = require('./crm_scheduler');
 const Database = require('better-sqlite3');
 
 const db = new Database(process.env.WHATSAPPAI_DB_PATH || './agent.db');
@@ -61,6 +62,18 @@ if (!leadColumnNames.has('property_size')) {
 
 if (!leadColumnNames.has('budget_numeric')) {
   db.exec('ALTER TABLE leads ADD COLUMN budget_numeric INTEGER');
+}
+
+if (!leadColumnNames.has('followup_days')) {
+  db.exec('ALTER TABLE leads ADD COLUMN followup_days INTEGER');
+}
+
+if (!leadColumnNames.has('followup_status')) {
+  db.exec('ALTER TABLE leads ADD COLUMN followup_status TEXT');
+}
+
+if (!leadColumnNames.has('followup_due_at')) {
+  db.exec('ALTER TABLE leads ADD COLUMN followup_due_at TEXT');
 }
 
 
@@ -271,6 +284,9 @@ const updateLead = db.prepare(`
       location = COALESCE(?, location),
       property_size = COALESCE(?, property_size),
       budget_numeric = COALESCE(?, budget_numeric),
+      followup_days = COALESCE(?, followup_days),
+      followup_status = COALESCE(?, followup_status),
+      followup_due_at = COALESCE(?, followup_due_at),
       updated_at = CURRENT_TIMESTAMP
   WHERE phone = ?
 `);
@@ -279,6 +295,17 @@ const saveMessage = db.prepare(`
   INSERT INTO messages (phone, direction, message)
   VALUES (?, ?, ?)
 `);
+
+const getAllLeadsStmt = db.prepare(`
+  SELECT *
+  FROM leads
+  WHERE followup_status IS NULL
+     OR followup_status != 'completed'
+`);
+
+function getAllLeads() {
+  return getAllLeadsStmt.all();
+}
 
 function getOrCreateLead(phone) {
   let lead = findLead.get(phone);
@@ -291,7 +318,26 @@ function getOrCreateLead(phone) {
   return lead;
 }
 
-function updateLeadInfo(phone, info) {
+function updateLeadInfo(phone, info = {}) {
+  let followupDueAt = info.followup_due_at ?? null;
+
+  // When follow-up days are supplied, create a fixed due date.
+  // Do not overwrite an existing due date unless explicitly supplied.
+  if (
+    followupDueAt === null &&
+    info.followup_days !== undefined &&
+    info.followup_days !== null
+  ) {
+    const existing = findLead.get(phone);
+
+    if (!existing || !existing.followup_due_at) {
+      followupDueAt = getFollowUpDueAt(
+        info,
+        new Date()
+      ).toISOString();
+    }
+  }
+
   updateLead.run(
     info.name ?? null,
     info.interest ?? null,
@@ -303,6 +349,9 @@ function updateLeadInfo(phone, info) {
     info.location ?? null,
     info.property_size ?? null,
     info.budget_numeric ?? null,
+    info.followup_days ?? null,
+    info.followup_status ?? null,
+    followupDueAt,
     phone
   );
 
@@ -395,11 +444,11 @@ function searchGroupMessages(ownerPhone, query, limit = 20) {
 module.exports = {
   db,
   getOrCreateLead,
+  getAllLeads,
   updateLeadInfo,
   addMessage,
   addGroupMessage,
-  searchGroupMessages
-  ,
+  searchGroupMessages,
   registerWhatsappMessage,
   claimWhatsappMessage,
   completeWhatsappMessage,

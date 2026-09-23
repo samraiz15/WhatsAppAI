@@ -17,12 +17,9 @@ function isFollowUpDue(lead = {}, now = new Date()) {
 
   const dueAt = lead.followup_due_at
     ? new Date(lead.followup_due_at)
-    : getFollowUpDueAt(
-        lead,
-        lead.followup_started_at
-          ? new Date(lead.followup_started_at)
-          : new Date(now)
-      );
+    : lead.followup_started_at
+      ? getFollowUpDueAt(lead, new Date(lead.followup_started_at))
+      : getFollowUpDueAt(lead, new Date(now));
 
   return new Date(now) >= dueAt;
 }

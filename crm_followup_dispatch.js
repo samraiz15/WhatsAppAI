@@ -2,7 +2,11 @@
 
 const { runFollowUps } = require('./crm_followup_runner');
 
-async function dispatchFollowUps(leads = [], sendMessage, now = new Date()) {
+async function dispatchFollowUps(
+  leads = [],
+  sendMessage,
+  now = new Date()
+) {
   if (!Array.isArray(leads)) {
     throw new TypeError('leads must be an array');
   }
@@ -17,13 +21,24 @@ async function dispatchFollowUps(leads = [], sendMessage, now = new Date()) {
   for (const followUp of followUps) {
     if (!followUp.phone) continue;
 
-    const result = await sendMessage(followUp.phone, followUp.message);
+    try {
+      const result = await sendMessage(
+        followUp.phone,
+        followUp.message
+      );
 
-    results.push({
-      ...followUp,
-      sent: true,
-      result
-    });
+      results.push({
+        ...followUp,
+        sent: true,
+        result
+      });
+    } catch (error) {
+      results.push({
+        ...followUp,
+        sent: false,
+        error: error.message
+      });
+    }
   }
 
   return results;
