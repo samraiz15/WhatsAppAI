@@ -16,6 +16,7 @@ const {
   detectSearchSize,
   detectSearchBudget
 } = require('./conversation');
+const { hasInboundMessageForPhone } = require('./db');
 
 const phone = '+923009999999';
 
@@ -135,11 +136,35 @@ function testSearchParsing() {
   }
 }
 
+async function testOutboundContactGuard() {
+  const phone = '+923009999998';
+
+  assert.strictEqual(hasInboundMessageForPhone(phone), false, 'New phone should not have prior inbound message');
+
+  const original = require('./db');
+  const messageId = `guard-${Date.now()}`;
+  original.registerWhatsappMessage({
+    messageId,
+    remoteJid: null,
+    participantJid: phone,
+    fromMe: false,
+    messageType: 'conversation',
+    messageText: 'hello',
+    messageTimestamp: Math.floor(Date.now() / 1000)
+  });
+
+  assert.strictEqual(hasInboundMessageForPhone(phone), true, 'Inbound customer message should make the phone eligible when stored via participant_jid');
+  assert.strictEqual(hasInboundMessageForPhone('923009999998@s.whatsapp.net'), true, 'Normalized inbound JID should also count as eligible');
+
+  console.log('PASS: outbound contact guard regression');
+}
+
 async function main() {
   testPropertyParsing();
   testSearchParsing();
   await testLeadConversation();
   await testNameDetection();
+  await testOutboundContactGuard();
 
   console.log('\nCONVERSATION TESTS: 100% PASSED');
 }

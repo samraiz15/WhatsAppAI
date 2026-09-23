@@ -12,7 +12,14 @@ const {
   getMonitoredGroups,
   setMonitoredGroupJid
 } = require('./groups');
-const { addGroupMessage, registerWhatsappMessage, claimWhatsappMessage, completeWhatsappMessage, failWhatsappMessage } = require('./db');
+const {
+  addGroupMessage,
+  registerWhatsappMessage,
+  claimWhatsappMessage,
+  completeWhatsappMessage,
+  failWhatsappMessage,
+  hasInboundMessageForPhone
+} = require('./db');
 const { extractMessageText, safeLogValue } = require('./message-utils');
 const { classify, compactLog } = require('./ingestPolicy');
 const demoConfig = require('./demo-config');
@@ -205,16 +212,25 @@ async function start() {
       }
 
       const messageId = message.key?.id;
+      const isBotMessage = message.key?.fromMe === true;
 
       if (!messageId) {
         console.log('MESSAGE SKIPPED: no message id');
         continue;
       }
 
+      // Bot-originated direct messages must never be treated as customer input,
+      // blocked, or reprocessed. They are allowed to exist in the ledger only.
+      if (isBotMessage) {
+        console.log('BOT MESSAGE: ALLOWED FOR LEDGER ONLY; SKIPPED FROM CUSTOMER PROCESSING:', messageId);
+        completeWhatsappMessage(messageId);
+        continue;
+      }
+
       const policy = classify(
         {
           ts: message.messageTimestamp,
-          fromMe: message.key?.fromMe === true,
+          fromMe: isBotMessage,
           text: extractMessageText(message.message),
           demoMode: demoConfig.demoMode,
           demoActive: demoConfig.demoMode && isDemoActive(),
@@ -228,7 +244,9 @@ async function start() {
         nowSec
       );
 
-      console.log('INGEST POLICY:', messageId, policy);
+      if (!isBotMessage) {
+        console.log('INGEST POLICY:', messageId, policy);
+      }
 
       if (!policy.ingest) {
         console.log(
@@ -236,14 +254,6 @@ async function start() {
           messageId,
           policy.reason
         );
-        continue;
-      }
-
-      // Bot's own outgoing messages may pass demo ingest so they can be
-      // recorded, but they must never be fed back into processMessage().
-      if (message.key?.fromMe === true) {
-        console.log('BOT MESSAGE SKIPPED FROM PROCESSING:', messageId);
-        completeWhatsappMessage(messageId);
         continue;
       }
 
@@ -269,13 +279,16 @@ async function start() {
       '';
 
     try {
+      const inboundPhone = message.key?.remoteJidAlt || message.key?.remoteJid || null;
+      const participantJid =
+        message.key?.participantAlt ||
+        message.key?.participant ||
+        null;
+
       const registration = registerWhatsappMessage({
         messageId,
-        remoteJid: message.key?.remoteJid || null,
-        participantJid:
-          message.key?.participantAlt ||
-          message.key?.participant ||
-          null,
+        remoteJid: inboundPhone ? inboundPhone.replace('@lid', '@s.whatsapp.net') : null,
+        participantJid: participantJid ? participantJid.replace('@lid', '@s.whatsapp.net') : null,
         fromMe: message.key?.fromMe === true,
         messageType,
         messageText: messageTextForLog || null,
@@ -586,6 +599,14 @@ async function start() {
         continue;
       }
 
+      const hasInboundContact = hasInboundMessageForPhone(normalizedPhone);
+      if (!hasInboundContact && !normalizedPhone.endsWith('@g.us')) {
+        console.log('OUTBOUND DM BLOCKED: no prior inbound contact from', normalizedPhone);
+        completeWhatsappMessage(messageId);
+        continue;
+      }
+
+      console.log('OUTBOUND SEND TARGET:', phone, 'NORMALIZED:', normalizedPhone);
       await sock.sendMessage(phone, {
         text: result.reply
       });

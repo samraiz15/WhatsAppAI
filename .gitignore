@@ -9,3 +9,4 @@ auth/
 *.db-wal
 
 pairing-auth/
+bot.log

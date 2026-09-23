@@ -206,6 +206,51 @@ function failWhatsappMessage(messageId, error) {
   ).changes > 0;
 }
 
+function normalizePhoneEligibilityKey(value) {
+  const text = String(value || '').trim();
+  if (!text) return '';
+
+  const noPlus = text.replace(/^\+/, '');
+  const digits = noPlus.replace(/\D/g, '');
+  return digits;
+}
+
+const hasInboundMessageForPhoneStmt = db.prepare(`
+  SELECT 1
+  FROM whatsapp_messages
+  WHERE from_me = 0
+    AND (
+      remote_jid = ?
+      OR remote_jid = ?
+      OR participant_jid = ?
+      OR participant_jid = ?
+      OR remote_jid LIKE ?
+      OR participant_jid LIKE ?
+      OR remote_jid LIKE ?
+      OR participant_jid LIKE ?
+    )
+  LIMIT 1
+`);
+
+function hasInboundMessageForPhone(phone) {
+  const normalized = normalizePhoneEligibilityKey(phone);
+  if (!normalized) return false;
+
+  const exact = normalized + '@s.whatsapp.net';
+  const lidExact = normalized + '@lid';
+
+  return !!hasInboundMessageForPhoneStmt.get(
+    exact,
+    normalized,
+    exact,
+    lidExact,
+    `${normalized}@%`,
+    `${normalized}@%`,
+    `%${normalized}%`,
+    `%${normalized}%`
+  );
+}
+
 const findLead = db.prepare(`
   SELECT * FROM leads WHERE phone = ?
 `);
@@ -358,5 +403,6 @@ module.exports = {
   registerWhatsappMessage,
   claimWhatsappMessage,
   completeWhatsappMessage,
-  failWhatsappMessage
+  failWhatsappMessage,
+  hasInboundMessageForPhone
 };
