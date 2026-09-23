@@ -10,3 +10,9 @@ auth/
 
 pairing-auth/
 bot.log
+
+# WhatsApp authentication/session data
+pairing-auth/
+
+# Accidental empty/generated file
+/main
