@@ -157,7 +157,9 @@ function run() {
   assert.ok(/not current|date is missing|Check date/i.test(jadeAnswer));
 
   return routeParkViewQuestion('Tell me about Park View City').then(answer => {
-    assert.ok(/verified|source|specific|scoped|exact|current|authority|project|checked/i.test(answer));
+    assert.strictEqual(typeof answer, 'object');
+    assert.strictEqual(typeof answer.answer, 'string');
+    assert.ok(/verified|source|specific|scoped|exact|current|authority|project|checked/i.test(answer.answer));
     console.log('PROVENANCE ARCHITECTURE TESTS: 100% PASSED');
   });
 }
