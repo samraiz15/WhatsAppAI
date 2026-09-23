@@ -6,7 +6,7 @@ function buildFollowUpMessage(lead = {}) {
   const area = lead.area ? ` in ${lead.area}` : '';
   const budget = lead.budget ? ` around ${lead.budget}` : '';
 
-  return `Hi${name}, just following up on your ${interest.toLowerCase()} requirement${area}${budget}. Are you still looking, or would you like me to update your requirements?`;
+  return `Hi${name}, just following up on your ${interest} requirement${area}${budget}. Are you still looking, or would you like me to update your requirements?`;
 }
 
 function shouldFollowUp(lead = {}) {
