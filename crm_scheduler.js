@@ -15,9 +15,11 @@ function isFollowUpDue(lead = {}, now = new Date()) {
   if (!lead.phone) return false;
   if (lead.followup_status === 'completed') return false;
 
-  const dueAt = getFollowUpDueAt(lead, lead.followup_started_at
-    ? new Date(lead.followup_started_at)
-    : now);
+  const dueAt = lead.followup_due_at
+    ? new Date(lead.followup_due_at)
+    : getFollowUpDueAt(lead, lead.followup_started_at
+      ? new Date(lead.followup_started_at)
+      : new Date(new Date(now).getTime() - 86400000));
 
   return new Date(now) >= dueAt;
 }
