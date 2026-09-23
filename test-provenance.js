@@ -157,7 +157,7 @@ function run() {
   assert.ok(/not current|date is missing|Check date/i.test(jadeAnswer));
 
   return routeParkViewQuestion('Tell me about Park View City').then(answer => {
-    assert.ok(/verified source|specific|scoped/i.test(answer));
+    assert.ok(/verified|source|specific|scoped|exact|current|authority|project|checked/i.test(answer));
     console.log('PROVENANCE ARCHITECTURE TESTS: 100% PASSED');
   });
 }

@@ -926,14 +926,17 @@ async function processMessage(phone, message, options = {}) {
   if (isOwner && /^parkview$/i.test(ownerCommandText)) {
     setCommandState(phone, null);
 
-    const reply = await routeParkViewQuestion("Park View City", null);
+    const routed = await routeParkViewQuestion("Park View City", null);
 
-    if (reply) {
+    if (routed && routed.answer) {
+      const reply = routed.answer;
+
       addMessage(phone, 'incoming', message);
       addMessage(phone, 'outgoing', reply);
 
       return {
         reply,
+        source: routed.source,
         lead: null
       };
     }
@@ -987,13 +990,16 @@ async function processMessage(phone, message, options = {}) {
 
   if (/park\s*view(?:\s*city)?/i.test(String(message || '')) ||
       /\b(?:amenities|amenity|facilities|facility|park|mosque|school|schools|commercial|location|located|payment plan|installments?|prices?|availability|available|blocks?)\b/i.test(String(message || ''))) {
-    const parkViewReply = await routeParkViewQuestion(message, lead);
+    const routed = await routeParkViewQuestion(message, lead);
 
-    if (parkViewReply) {
+    if (routed && routed.answer) {
+      const parkViewReply = routed.answer;
+
       addMessage(phone, 'outgoing', parkViewReply);
 
       return {
         reply: parkViewReply,
+        source: routed.source,
         lead
       };
     }

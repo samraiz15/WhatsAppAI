@@ -1,9 +1,10 @@
 const http = require('http');
 const { getBrainPrompt } = require('./real_estate_brain');
 const { getParkViewContext } = require('./parkview_knowledge');
+const demoConfig = require('./demo-config');
 
 const MODEL = 'qwen2.5:0.5b';
-const OLLAMA_TIMEOUT = 20000;
+const OLLAMA_TIMEOUT = demoConfig.localTimeoutMs;
 
 function askOllama(prompt, history = [], memory = {}) {
   return new Promise((resolve) => {

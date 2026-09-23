@@ -147,73 +147,115 @@ async function routeParkViewQuestion(message, lead = {}) {
   const text = String(message || '');
   const intent = detectIntent(text);
 
-  const knowledgeAnswer = getParkViewKnowledgeAnswer(text, lead);
-  if (knowledgeAnswer) {
-    return knowledgeAnswer;
-  }
-
   const lower = text.toLowerCase();
 
   if (
     intent === 'approval' &&
     /\b(?:approved|approval|noc|lda|ruda|legal|documentation)\b/i.test(lower)
   ) {
-    return 'Approval and NOC status must be checked for the exact block, project and authority. Please tell me which block or project you mean and whether you are asking about LDA, RUDA, transfer/building eligibility, or final NOC status. I need the exact current source before I can answer that confidently.';
+    const block = ['jade', 'jasmine', 'sapphire', 'tulip', 'imperial', 'executive', 'crystal', 'diamond', 'platinum']
+      .find((name) => new RegExp(`\\b${name}\\b`, 'i').test(lower));
+
+    return {
+      answer: block
+        ? `Approval and NOC status for ${block.charAt(0).toUpperCase() + block.slice(1)} must be checked against the exact current project and authority record. Please specify whether you mean LDA, RUDA, transfer/building eligibility, or final NOC status.`
+        : 'Approval and NOC status must be checked for the exact block, project and authority. Please tell me which block or project you mean and whether you are asking about LDA, RUDA, transfer/building eligibility, or final NOC status.',
+      source: 'local_knowledge'
+    };
+  }
+
+  const knowledgeAnswer = getParkViewKnowledgeAnswer(text, lead);
+  if (knowledgeAnswer) {
+    return { answer: knowledgeAnswer, source: 'local_knowledge' };
+  }
+
+  if (
+    intent === 'approval' &&
+    /\b(?:approved|approval|noc|lda|ruda|legal|documentation)\b/i.test(lower)
+  ) {
+    return {
+      answer: 'Approval and NOC status must be checked for the exact block, project and authority. Please tell me which block or project you mean and whether you are asking about LDA, RUDA, transfer/building eligibility, or final NOC status. I need the exact current source before I can answer that confidently.',
+      source: 'local_knowledge'
+    };
   }
 
   if (
     /\b(?:price|prices|rate|rates|cost|costs|how much|current price)\b/i.test(lower) &&
     /\b(?:park view|parkview|jade|jasmine|sapphire|tulip|imperial|executive|crystal|diamond|platinum)\b/i.test(lower)
   ) {
-    return 'Current price needs confirmation. I do not have a verified current figure for that exact block and product, and current Park View pricing is time-sensitive.';
+    return {
+      answer: 'Current price needs confirmation. I do not have a verified current figure for that exact block and product, and current Park View pricing is time-sensitive.',
+      source: 'local_knowledge'
+    };
   }
 
   const deterministic = deterministicAnswer(intent, lead);
 
   if (deterministic) {
-    return deterministic;
+    return { answer: deterministic, source: 'local_knowledge' };
   }
 
   if (
     intent === 'unknown' &&
     /park\s*view|parkview|block|approval|approved|noc|lda|ruda|price|availability|possession|development|transfer|title|house|plot|amenities|location|utility|gas|electricity|water/i.test(lower)
   ) {
-    return 'I do not have a verified source for that specific Park View/property question. Please provide the exact project, block, property type or authority so the answer can remain properly scoped.';
+    return {
+      answer: 'I do not have a verified source for that specific Park View/property question. Please provide the exact project, block, property type or authority so the answer can remain properly scoped.',
+      source: 'local_knowledge'
+    };
   }
 
   const context = getParkViewContext(message, 1400);
 
   if (intent === 'location') {
-    return 'I do not have a dated source record available for a current location or access claim. Please verify the project location and route against a current official map or authority record.';
+    return {
+      answer: 'I do not have a dated source record available for a current location or access claim. Please verify the project location and route against a current official map or authority record.',
+      source: 'local_knowledge'
+    };
   }
 
   if (intent === 'amenities') {
     const t = String(message || '').toLowerCase();
 
     if (/school|schools/.test(t)) {
-      return "I do not have a dated source record for current school operations or availability. Please verify the exact facility and block from current project information.";
+      return {
+        answer: "I do not have a dated source record for current school operations or availability. Please verify the exact facility and block from current project information.",
+        source: 'local_knowledge'
+      };
     }
 
     if (/mosque|mosques/.test(t)) {
-      return "I do not have a dated source record for current mosque operations or exact location. Please verify the facility against current project information.";
+      return {
+        answer: "I do not have a dated source record for current mosque operations or exact location. Please verify the facility against current project information.",
+        source: 'local_knowledge'
+      };
     }
 
     if (/commercial/.test(t)) {
-      return "I do not have a dated source record for current commercial availability. Please verify the exact area and operating status from current project information.";
+      return {
+        answer: "I do not have a dated source record for current commercial availability. Please verify the exact area and operating status from current project information.",
+        source: 'local_knowledge'
+      };
     }
 
     if (/park|parks|green|recreational/.test(t)) {
-      return "I do not have a dated source record for current park or recreational-facility status. Please verify the exact facility and operating status from current project information.";
+      return {
+        answer: "I do not have a dated source record for current park or recreational-facility status. Please verify the exact facility and operating status from current project information.",
+        source: 'local_knowledge'
+      };
     }
 
-    return "I do not have dated source records for current amenities or operating status. Please specify the facility and block so the answer can remain properly scoped.";
+    return {
+      answer: "I do not have dated source records for current amenities or operating status. Please specify the facility and block so the answer can remain properly scoped.",
+      source: 'local_knowledge'
+    };
   }
 
   if (intent === 'block_comparison') {
     const size = lead.property_size || 'your required size';
     const budget = lead.budget || 'your budget';
 
-    return `For your ${size} house and ${budget} budget, I would compare Crystal, Diamond, Platinum and other relevant blocks based on property condition, exact location and asking price. If you want, I can narrow the comparison further based on whether you want a ready-to-live house, grey structure or plot.`;
+    return { answer: `For your ${size} house and ${budget} budget, I would compare Crystal, Diamond, Platinum and other relevant blocks based on property condition, exact location and asking price. If you want, I can narrow the comparison further based on whether you want a ready-to-live house, grey structure or plot.`, source: 'local_knowledge' };
   }
 
   if (/^(sure|ok|okay|yes|yeah|yep|alright|fine|great|thanks|thank you)/.test(String(message || '').trim().toLowerCase())) {
@@ -221,7 +263,10 @@ async function routeParkViewQuestion(message, lead = {}) {
     const size = lead.property_size || 'your required size';
     const budget = lead.budget || 'your budget';
 
-    return `Perfect, ${name}. I'll focus on ${size} Park View City house options that fit your ${budget} budget.`;
+    return {
+      answer: `Perfect, ${name}. I'll focus on ${size} Park View City house options that fit your ${budget} budget.`,
+      source: 'local_knowledge'
+    };
   }
 
   if (/\b(?:i want|looking for|need)\b/.test(String(message || '').toLowerCase()) &&
@@ -231,27 +276,39 @@ async function routeParkViewQuestion(message, lead = {}) {
     const size = t.match(/\b(?:3\.5|5|7|10|15|20)\s*marla\b|\b(?:1|2)\s*kanal\b/);
     const sizeText = size ? size[0].replace(/\\s+/g, ' ').trim() : 'the requested size';
 
-    return `Understood. You're looking for a ${sizeText} house in Park View City. If you share your budget and purchase timeline, I can narrow the suitable options and blocks for you.`;
+    return {
+      answer: `Understood. You're looking for a ${sizeText} house in Park View City. If you share your budget and purchase timeline, I can narrow the suitable options and blocks for you.`,
+      source: 'local_knowledge'
+    };
   }
 
   if (intent === 'amenities') {
     const t = String(message || '').toLowerCase();
 
     if (/school|schools/.test(t)) {
-      return "Park View City Lahore has The National School inside the society. If you want, I can also identify other nearby schools and compare them by location and access.";
+      return {
+        answer: "Park View City Lahore has The National School inside the society. If you want, I can also identify other nearby schools and compare them by location and access.",
+        source: 'local_knowledge'
+      };
     }
 
     if (/mosque|mosques/.test(t)) {
-      return "Park View City Lahore has mosque facilities within the society. If you tell me the block, I can narrow the answer to the relevant nearby mosque and surrounding facilities.";
+      return {
+        answer: "Park View City Lahore has mosque facilities within the society. If you tell me the block, I can narrow the answer to the relevant nearby mosque and surrounding facilities.",
+        source: 'local_knowledge'
+      };
     }
 
     if (/commercial/.test(t)) {
-      return "Park View City Lahore has dedicated commercial areas serving residents and businesses. If you tell me which block you're considering, I can narrow down the relevant commercial area.";
+      return {
+        answer: "Park View City Lahore has dedicated commercial areas serving residents and businesses. If you tell me which block you're considering, I can narrow down the relevant commercial area.",
+        source: 'local_knowledge'
+      };
     }
 
     const context = getParkViewContext(message, 1400);
     if (context && context.trim()) {
-      return context;
+      return { answer: context, source: 'local_knowledge' };
     }
   }
 
@@ -285,7 +342,8 @@ ${String(message)}
 ANSWER:
 `.trim();
 
-  return await askOllama(prompt, [], lead);
+  const answer = await askOllama(prompt, [], lead);
+  return { answer, source: 'local_ai' };
 }
 
 module.exports = {
