@@ -561,11 +561,15 @@ async function start() {
     if (demoConfig.demoMode && isRateLimited(phone)) {
       console.log('DEMO RATE LIMIT:', phone);
 
-      completeWhatsappMessage(messageId);
-
-      await sock.sendMessage(phone, {
-        text: 'You have reached the demo message limit. Please try again in a minute.'
-      });
+      try {
+        await sock.sendMessage(phone, {
+          text: 'You have reached the demo message limit. Please try again in a minute.'
+        });
+        completeWhatsappMessage(messageId);
+      } catch (error) {
+        failWhatsappMessage(messageId, error.message);
+        console.error('Rate-limit response error:', error.message);
+      }
 
       continue;
     }
@@ -620,9 +624,13 @@ async function start() {
       failWhatsappMessage(messageId, error.message);
 
       if (policy.reply) {
-        await sock.sendMessage(phone, {
-          text: 'Sorry, something went wrong. Please try again.'
-        });
+        try {
+          await sock.sendMessage(phone, {
+            text: 'Sorry, something went wrong. Please try again.'
+          });
+        } catch (fallbackError) {
+          console.error('Fallback response error:', fallbackError.message);
+        }
       }
     }
     }
