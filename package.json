@@ -4,7 +4,7 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "node --check conversation.js && node --check router.js && node --check parkview_knowledge.js && node --check test-provenance.js && node test-conversation.js && node test-parkview.js && node test-provenance.js && node test-property-search.js"
+    "test": "node --check conversation.js && node --check router.js && node --check parkview_knowledge.js && node --check test-provenance.js && node test-conversation.js && node test-parkview.js && node test-provenance.js && node test-property-search.js && node test-message-dedup.js"
   },
   "keywords": [],
   "author": "",
