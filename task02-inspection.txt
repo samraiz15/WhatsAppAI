@@ -1,0 +1,1319 @@
+=== index.js ===
+const {
+  default: makeWASocket,
+  useMultiFileAuthState,
+  fetchLatestWaWebVersion,
+  Browsers,
+  DisconnectReason
+} = require('@whiskeysockets/baileys');
+
+const P = require('pino');
+const { processMessage } = require('./conversation');
+const {
+  getMonitoredGroups,
+  setMonitoredGroupJid
+} = require('./groups');
+const { addGroupMessage, registerWhatsappMessage, claimWhatsappMessage, completeWhatsappMessage, failWhatsappMessage } = require('./db');
+const { extractMessageText } = require('./message-utils');
+const { classify, compactLog } = require('./ingestPolicy');
+
+const AUTH_DIR = './pairing-auth';
+
+const CONNECTION_STATES = Object.freeze({
+  STARTING: 'STARTING',
+  CONNECTING: 'CONNECTING',
+  CONNECTED: 'CONNECTED',
+  DISCONNECTED: 'DISCONNECTED',
+  RECONNECTING: 'RECONNECTING',
+  LOGGED_OUT: 'LOGGED_OUT'
+});
+
+let connectionState = CONNECTION_STATES.DISCONNECTED;
+let startInProgress = false;
+let reconnectTimer = null;
+
+async function start() {
+  if (startInProgress || connectionState === CONNECTION_STATES.CONNECTED) {
+    return;
+  }
+
+  startInProgress = true;
+
+  if (connectionState !== CONNECTION_STATES.RECONNECTING) {
+    connectionState = CONNECTION_STATES.STARTING;
+  }
+
+  console.log('Connection state:', connectionState);
+
+  let version;
+  let state;
+  let saveCreds;
+
+  try {
+    ({ version } = await fetchLatestWaWebVersion());
+
+    console.log('Using WA Web version:', version.join('.'));
+
+    ({ state, saveCreds } =
+      await useMultiFileAuthState(AUTH_DIR));
+  } catch (error) {
+    startInProgress = false;
+    connectionState = CONNECTION_STATES.DISCONNECTED;
+    console.error('START ERROR:', error.message);
+    throw error;
+  }
+
+  const sock = makeWASocket({
+    auth: state,
+    version,
+    logger: P({ level: 'silent' }),
+    browser: Browsers.ubuntu('WhatsApp AI Agent')
+  });
+
+  sock.ev.on('creds.update', saveCreds);
+
+  sock.ev.on('connection.update', async ({
+    connection,
+    qr,
+    lastDisconnect
+  }) => {
+    if (qr) {
+      const qrcode = require('qrcode-terminal');
+
+      console.log('\nSCAN THIS QR WITH WHATSAPP:\n');
+      qrcode.generate(qr, { small: true });
+    }
+
+    if (connection === 'open') {
+      connectionState = CONNECTION_STATES.CONNECTED;
+      startInProgress = false;
+
+      if (reconnectTimer) {
+        clearTimeout(reconnectTimer);
+        reconnectTimer = null;
+      }
+
+      console.log('Connection:', connection, '| State:', connectionState);
+    }
+
+    if (connection === 'connecting') {
+      connectionState = CONNECTION_STATES.CONNECTING;
+      console.log('Connection:', connection, '| State:', connectionState);
+    }
+
+    if (connection === 'close') {
+      connectionState = CONNECTION_STATES.DISCONNECTED;
+      console.log('Connection:', connection, '| State:', connectionState);
+    }
+
+    if (lastDisconnect) {
+      const code =
+        lastDisconnect.error?.output?.statusCode;
+
+      console.log(
+        'Disconnect:',
+        lastDisconnect.error?.message || 'unknown',
+        code ? `(code ${code})` : ''
+      );
+
+      if (code === DisconnectReason.connectionReplaced) {
+        startInProgress = false;
+        connectionState = CONNECTION_STATES.DISCONNECTED;
+        console.log('CONNECTION REPLACED: stopping auto-reconnect');
+        return;
+      }
+
+      if (code === DisconnectReason.loggedOut) {
+        startInProgress = false;
+        connectionState = CONNECTION_STATES.LOGGED_OUT;
+        console.log('Logged out. Delete pairing-auth and pair again.');
+        return;
+      }
+
+      startInProgress = false;
+      connectionState = CONNECTION_STATES.RECONNECTING;
+
+      if (reconnectTimer) {
+        console.log('RECONNECT ALREADY SCHEDULED');
+        return;
+      }
+
+      console.log('Connection ended. Restarting in 3 seconds...');
+
+      reconnectTimer = setTimeout(() => {
+        reconnectTimer = null;
+
+        start().catch(error => {
+          startInProgress = false;
+          connectionState = CONNECTION_STATES.DISCONNECTED;
+          console.error('Restart error:', error.message);
+        });
+      }, 3000);
+    }
+  });
+
+  sock.ev.on('messages.upsert', async ({ messages, type }) => {
+    console.log(
+      'MESSAGE EVENT:',
+      type,
+      messages?.length || 0
+    );
+
+    const nowSec = Math.floor(Date.now() / 1000);
+
+    for (const message of messages || []) {
+      console.log('INGEST:', compactLog(type, message, nowSec));
+
+      if (!message) {
+        console.log('MESSAGE SKIPPED: empty message');
+        continue;
+      }
+
+      const messageId = message.key?.id;
+
+      if (!messageId) {
+        console.log('MESSAGE SKIPPED: no message id');
+        continue;
+      }
+
+      const policy = classify(
+        {
+          ts: message.messageTimestamp,
+          fromMe: message.key?.fromMe === true,
+          isGroup: String(
+            message.key?.remoteJid ||
+            message.key?.remoteJidAlt ||
+            ''
+          ).endsWith('@g.us'),
+          upsertType: type
+        },
+        nowSec
+      );
+
+      console.log('INGEST POLICY:', messageId, policy);
+
+      if (!policy.ingest) {
+        console.log(
+          'MESSAGE INGEST SKIPPED:',
+          messageId,
+          policy.reason
+        );
+        continue;
+      }
+
+      console.log(
+        'RAW MESSAGE:',
+        JSON.stringify(message, null, 2)
+      );
+
+      if (!message?.message) {
+        console.log('MESSAGE SKIPPED: no message payload');
+        continue;
+      }
+
+    const messageType =
+      Object.keys(message.message || {})[0] || null;
+
+    const messageTextForLog =
+      message.message?.conversation ||
+      message.message?.extendedTextMessage?.text ||
+      message.message?.imageMessage?.caption ||
+      message.message?.videoMessage?.caption ||
+      message.message?.documentMessage?.caption ||
+      '';
+
+    try {
+      const registration = registerWhatsappMessage({
+        messageId,
+        remoteJid: message.key?.remoteJid || null,
+        participantJid:
+          message.key?.participantAlt ||
+          message.key?.participant ||
+          null,
+        fromMe: message.key?.fromMe === true,
+        messageType,
+        messageText: messageTextForLog || null,
+        messageTimestamp: Number(message.messageTimestamp || 0) || null
+      });
+
+      if (!registration.inserted) {
+        console.log('MESSAGE DUPLICATE SKIPPED:', messageId);
+        continue;
+      }
+
+      if (!claimWhatsappMessage(messageId)) {
+        console.log('MESSAGE CLAIM FAILED:', messageId);
+        continue;
+      }
+
+    } catch (error) {
+      console.error('MESSAGE IDEMPOTENCY ERROR:', error.message);
+      continue;
+    }
+
+    const isGroupMessage = String(
+      message.key?.remoteJid ||
+      message.key?.remoteJidAlt ||
+      ''
+    ).endsWith('@g.us');
+
+    if (!policy.reply && !isGroupMessage) {
+      console.log(
+        'DM HISTORY INGESTED WITHOUT REPLY:',
+        messageId,
+        policy.reason
+      );
+      completeWhatsappMessage(messageId);
+      continue;
+    }
+
+    const phone = message.key.remoteJidAlt || message.key.remoteJid;
+
+    if (!phone) {
+      completeWhatsappMessage(messageId);
+      continue;
+    }
+
+    const ownerId = sock.user?.id || '';
+    const ownerNumber = ownerId.split(':')[0].split('@')[0];
+    const ownerPhone = ownerNumber
+      ? ownerNumber + '@s.whatsapp.net'
+      : null;
+
+    const normalizedPhone = phone.replace('@lid', '@s.whatsapp.net');
+
+    if (message.key.fromMe && !ownerPhone) {
+      completeWhatsappMessage(messageId);
+      continue;
+    }
+
+    const textPreview = extractMessageText(message.message);
+
+    const ownerCommand =
+      /^(list|add group|remove group|groups|search|leads|parkview|status)$/i.test(
+        String(textPreview || '').trim()
+      );
+
+    if (ownerCommand && normalizedPhone !== ownerPhone) {
+      console.log('COMMAND BLOCKED: unauthorized number', phone);
+      completeWhatsappMessage(messageId);
+      continue;
+    }
+
+    if (normalizedPhone !== ownerPhone && !phone.endsWith('@g.us')) {
+      console.log('CONTACT CHAT BLOCKED:', phone);
+      completeWhatsappMessage(messageId);
+      continue;
+    }
+
+    if (phone.endsWith('@g.us')) {
+      const ownerId = sock.user?.id || '';
+      const ownerNumber = ownerId.split(':')[0].split('@')[0];
+      const ownerPhone = ownerNumber
+        ? ownerNumber + '@s.whatsapp.net'
+        : null;
+
+      if (!ownerPhone) {
+        console.log('GROUP SKIPPED: owner identity unavailable');
+        completeWhatsappMessage(messageId);
+        continue;
+      }
+
+      const monitoredGroups = getMonitoredGroups(ownerPhone);
+
+      console.log('GROUP OWNER DEBUG:', {
+        ownerPhone,
+        remoteJid: phone,
+        monitoredGroups
+      });
+
+      if (!monitoredGroups.length) {
+        console.log('GROUP SKIPPED: no monitored groups configured');
+        completeWhatsappMessage(messageId);
+        continue;
+      }
+
+      let groupMetadata;
+
+      try {
+        groupMetadata = await sock.groupMetadata(phone);
+      } catch (error) {
+        console.error('GROUP METADATA ERROR:', error.message);
+        failWhatsappMessage(messageId, error.message);
+        continue;
+      }
+
+      const normalizeGroupName = (name) =>
+        String(name || '')
+          .normalize('NFKC')
+          .replace(/\s+/g, ' ')
+          .trim()
+          .toLowerCase();
+
+      const whatsappGroupName = normalizeGroupName(groupMetadata.subject);
+
+      let monitoredGroup = monitoredGroups.find(
+        group => group.group_jid === phone
+      );
+
+      if (monitoredGroup) {
+        const currentGroupName = String(groupMetadata.subject || '').trim();
+
+        if (
+          currentGroupName &&
+          currentGroupName !== monitoredGroup.group_name
+        ) {
+          const updated = setMonitoredGroupJid(
+            ownerPhone,
+            monitoredGroup.id,
+            phone,
+            currentGroupName
+          );
+
+          if (updated) {
+            console.log(
+              'GROUP NAME UPDATED:',
+              monitoredGroup.group_name,
+              '=>',
+              currentGroupName
+            );
+
+            monitoredGroup = {
+              ...monitoredGroup,
+              group_name: currentGroupName
+            };
+          }
+        }
+      }
+
+      if (!monitoredGroup) {
+        monitoredGroup = monitoredGroups.find(
+          group =>
+            normalizeGroupName(group.group_name) === whatsappGroupName
+        );
+
+        if (monitoredGroup) {
+          const linked = setMonitoredGroupJid(
+            ownerPhone,
+            monitoredGroup.id,
+            phone,
+            groupMetadata.subject
+          );
+
+          if (linked) {
+            console.log(
+              'GROUP JID LINKED:',
+              monitoredGroup.group_name,
+              '=>',
+              phone
+            );
+          }
+        }
+      }
+
+      if (!monitoredGroup) {
+        console.log('GROUP SKIPPED:', groupMetadata.subject || phone);
+        completeWhatsappMessage(messageId);
+        continue;
+      }
+
+      console.log('MONITORED GROUP:', groupMetadata.subject);
+      console.log('GROUP MESSAGE:', JSON.stringify(message, null, 2));
+
+      const groupText = extractMessageText(message.message);
+
+      if (!groupText.trim()) {
+        console.log('GROUP MESSAGE SKIPPED: no text');
+        completeWhatsappMessage(messageId);
+        continue;
+      }
+
+      const senderPhone =
+        message.key.participantAlt ||
+        message.key.participant ||
+        null;
+
+      addGroupMessage(
+        ownerPhone,
+        phone,
+        groupMetadata.subject,
+        senderPhone,
+        message.pushName || null,
+        groupText.trim()
+      );
+
+      console.log('GROUP MESSAGE SAVED:', groupMetadata.subject);
+      completeWhatsappMessage(messageId);
+      continue;
+    }
+
+    const text = extractMessageText(message.message);
+
+    if (!text?.trim()) {
+      console.log("MESSAGE TYPE:", Object.keys(message.message || {}));
+      completeWhatsappMessage(messageId);
+      continue;
+    }
+
+    console.log('\nUSER:', text);
+
+    try {
+      const chatPhone = phone.endsWith('@g.us') ? phone : normalizedPhone;
+      const result = await processMessage(
+        chatPhone,
+        text.trim(),
+        {
+          isOwner: normalizedPhone === ownerPhone,
+          ownerPhone
+        }
+      );
+
+      console.log('AGENT:', result.reply);
+
+      if (result.action === 'open_connection') {
+        console.log('OWNER COMMAND: OPEN CONNECTION');
+
+        start().catch(error => {
+          console.error('Open connection error:', error.message);
+        });
+      }
+
+      if (!result.reply) {
+        console.log('NO REPLY NEEDED');
+        completeWhatsappMessage(messageId);
+        continue;
+      }
+
+      await sock.sendMessage(phone, {
+        text: result.reply
+      });
+
+      completeWhatsappMessage(messageId);
+
+      console.log('SENT');
+    } catch (error) {
+      console.error('Message error:', error.message);
+
+      failWhatsappMessage(messageId, error.message);
+
+      if (policy.reply) {
+        await sock.sendMessage(phone, {
+          text: 'Sorry, something went wrong. Please try again.'
+        });
+      }
+    }
+    }
+
+  });
+}
+
+start().catch(error => {
+  console.error('Fatal error:', error);
+  process.exit(1);
+});
+=== db.js ===
+const Database = require('better-sqlite3');
+
+const db = new Database(process.env.WHATSAPPAI_DB_PATH || './agent.db');
+
+db.pragma('journal_mode = WAL');
+
+db.exec(`
+  CREATE TABLE IF NOT EXISTS leads (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    phone TEXT UNIQUE NOT NULL,
+    name TEXT,
+    interest TEXT,
+    budget TEXT,
+    area TEXT,
+    timeline TEXT,
+    notes TEXT,
+    profession TEXT,
+    location TEXT,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  );
+
+  CREATE TABLE IF NOT EXISTS messages (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    phone TEXT NOT NULL,
+    direction TEXT NOT NULL,
+    message TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  );
+`);
+
+// Automatic schema migration for existing databases.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS group_messages (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    owner_phone TEXT NOT NULL,
+    group_jid TEXT NOT NULL,
+    group_name TEXT NOT NULL,
+    sender_phone TEXT,
+    sender_name TEXT,
+    message TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_group_messages_owner
+  ON group_messages(owner_phone);
+
+  CREATE INDEX IF NOT EXISTS idx_group_messages_group
+  ON group_messages(group_name);
+
+  CREATE INDEX IF NOT EXISTS idx_group_messages_message
+  ON group_messages(message);
+`);
+
+const leadColumns = db.prepare('PRAGMA table_info(leads)').all();
+const leadColumnNames = new Set(leadColumns.map(c => c.name));
+
+if (!leadColumnNames.has('property_size')) {
+  db.exec('ALTER TABLE leads ADD COLUMN property_size TEXT');
+}
+
+if (!leadColumnNames.has('budget_numeric')) {
+  db.exec('ALTER TABLE leads ADD COLUMN budget_numeric INTEGER');
+}
+
+
+db.exec(`
+  CREATE TABLE IF NOT EXISTS whatsapp_messages (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    message_id TEXT NOT NULL UNIQUE,
+    remote_jid TEXT,
+    participant_jid TEXT,
+    from_me INTEGER NOT NULL DEFAULT 0,
+    message_type TEXT,
+    message_text TEXT,
+    message_timestamp INTEGER,
+    status TEXT NOT NULL DEFAULT 'received',
+    claimed_at TEXT,
+    error TEXT,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    processed_at TEXT
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_whatsapp_messages_remote
+  ON whatsapp_messages(remote_jid);
+
+  CREATE INDEX IF NOT EXISTS idx_whatsapp_messages_status
+  ON whatsapp_messages(status);
+`);
+
+const whatsappMessageColumns = db
+  .prepare('PRAGMA table_info(whatsapp_messages)')
+  .all()
+  .map(column => column.name);
+
+if (!whatsappMessageColumns.includes('claimed_at')) {
+  db.exec(`
+    ALTER TABLE whatsapp_messages
+    ADD COLUMN claimed_at TEXT
+  `);
+}
+
+const insertWhatsappMessageStmt = db.prepare(`
+  INSERT OR IGNORE INTO whatsapp_messages (
+    message_id,
+    remote_jid,
+    participant_jid,
+    from_me,
+    message_type,
+    message_text,
+    message_timestamp
+  )
+  VALUES (?, ?, ?, ?, ?, ?, ?)
+`);
+
+const getWhatsappMessageStmt = db.prepare(`
+  SELECT *
+  FROM whatsapp_messages
+  WHERE message_id = ?
+`);
+
+const claimWhatsappMessageStmt = db.prepare(`
+  UPDATE whatsapp_messages
+  SET status = 'processing',
+      claimed_at = CURRENT_TIMESTAMP,
+      error = NULL
+  WHERE message_id = ?
+    AND (
+      status IN ('received', 'failed')
+      OR (
+        status = 'processing'
+        AND (
+          claimed_at IS NULL
+          OR datetime(claimed_at) <= datetime('now', '-5 minutes')
+        )
+      )
+    )
+`);
+
+const completeWhatsappMessageStmt = db.prepare(`
+  UPDATE whatsapp_messages
+  SET status = 'processed',
+      claimed_at = NULL,
+      error = NULL,
+      processed_at = CURRENT_TIMESTAMP
+  WHERE message_id = ?
+    AND status = 'processing'
+`);
+
+const failWhatsappMessageStmt = db.prepare(`
+  UPDATE whatsapp_messages
+  SET status = 'failed',
+      claimed_at = NULL,
+      error = ?
+  WHERE message_id = ?
+    AND status = 'processing'
+`);
+
+function registerWhatsappMessage({
+  messageId,
+  remoteJid = null,
+  participantJid = null,
+  fromMe = false,
+  messageType = null,
+  messageText = null,
+  messageTimestamp = null
+}) {
+  const id = String(messageId || '').trim();
+
+  if (!id) {
+    throw new Error('messageId is required');
+  }
+
+  const result = insertWhatsappMessageStmt.run(
+    id,
+    remoteJid,
+    participantJid,
+    fromMe ? 1 : 0,
+    messageType,
+    messageText,
+    messageTimestamp
+  );
+
+  return {
+    inserted: result.changes === 1,
+    message: getWhatsappMessageStmt.get(id)
+  };
+}
+
+function claimWhatsappMessage(messageId) {
+  return claimWhatsappMessageStmt.run(
+    String(messageId || '').trim()
+  ).changes > 0;
+}
+
+function completeWhatsappMessage(messageId) {
+  return completeWhatsappMessageStmt.run(
+    String(messageId || '').trim()
+  ).changes > 0;
+}
+
+function failWhatsappMessage(messageId, error) {
+  return failWhatsappMessageStmt.run(
+    String(error || '').slice(0, 1000),
+    String(messageId || '').trim()
+  ).changes > 0;
+}
+
+const findLead = db.prepare(`
+  SELECT * FROM leads WHERE phone = ?
+`);
+
+const createLead = db.prepare(`
+  INSERT INTO leads (phone) VALUES (?)
+`);
+
+const updateLead = db.prepare(`
+  UPDATE leads
+  SET name = COALESCE(?, name),
+      interest = COALESCE(?, interest),
+      budget = COALESCE(?, budget),
+      area = COALESCE(?, area),
+      timeline = COALESCE(?, timeline),
+      notes = COALESCE(?, notes),
+      profession = COALESCE(?, profession),
+      location = COALESCE(?, location),
+      property_size = COALESCE(?, property_size),
+      budget_numeric = COALESCE(?, budget_numeric),
+      updated_at = CURRENT_TIMESTAMP
+  WHERE phone = ?
+`);
+
+const saveMessage = db.prepare(`
+  INSERT INTO messages (phone, direction, message)
+  VALUES (?, ?, ?)
+`);
+
+function getOrCreateLead(phone) {
+  let lead = findLead.get(phone);
+
+  if (!lead) {
+    createLead.run(phone);
+    lead = findLead.get(phone);
+  }
+
+  return lead;
+}
+
+function updateLeadInfo(phone, info) {
+  updateLead.run(
+    info.name ?? null,
+    info.interest ?? null,
+    info.budget ?? null,
+    info.area ?? null,
+    info.timeline ?? null,
+    info.notes ?? null,
+    info.profession ?? null,
+    info.location ?? null,
+    info.property_size ?? null,
+    info.budget_numeric ?? null,
+    phone
+  );
+
+  return findLead.get(phone);
+}
+
+function addMessage(phone, direction, message) {
+  saveMessage.run(phone, direction, message);
+}
+
+const saveGroupMessage = db.prepare(`
+  INSERT INTO group_messages (
+    owner_phone,
+    group_jid,
+    group_name,
+    sender_phone,
+    sender_name,
+    message
+  )
+  VALUES (?, ?, ?, ?, ?, ?)
+`);
+
+const searchGroupMessagesStmt = db.prepare(`
+  SELECT
+    id,
+    group_jid,
+    group_name,
+    sender_phone,
+    sender_name,
+    message,
+    created_at
+  FROM group_messages
+  WHERE owner_phone = ?
+    AND message LIKE ?
+  ORDER BY id DESC
+  LIMIT ?
+`);
+
+const listGroupMessagesStmt = db.prepare(`
+  SELECT
+    id,
+    group_jid,
+    group_name,
+    sender_phone,
+    sender_name,
+    message,
+    created_at
+  FROM group_messages
+  WHERE owner_phone = ?
+  ORDER BY id DESC
+  LIMIT ?
+`);
+
+function addGroupMessage(
+  ownerPhone,
+  groupJid,
+  groupName,
+  senderPhone,
+  senderName,
+  message
+) {
+  if (!ownerPhone || !groupJid || !groupName || !message) {
+    return;
+  }
+
+  saveGroupMessage.run(
+    ownerPhone,
+    groupJid,
+    groupName,
+    senderPhone || null,
+    senderName || null,
+    message
+  );
+}
+
+function searchGroupMessages(ownerPhone, query, limit = 20) {
+  const text = String(query || '').trim();
+
+  if (!text) {
+    return listGroupMessagesStmt.all(ownerPhone, limit);
+  }
+
+  return searchGroupMessagesStmt.all(
+    ownerPhone,
+    `%${text}%`,
+    limit
+  );
+}
+
+module.exports = {
+  db,
+  getOrCreateLead,
+  updateLeadInfo,
+  addMessage,
+  addGroupMessage,
+  searchGroupMessages
+  ,
+  registerWhatsappMessage,
+  claimWhatsappMessage,
+  completeWhatsappMessage,
+  failWhatsappMessage
+};
+=== ingestPolicy.js ===
+'use strict';
+
+const CFG = {
+  replyMaxAgeSec: 300,
+  appendLiveWindowSec: 600,
+  retentionDays: 20,
+  futureSkewSec: 300
+};
+
+function toSeconds(ts) {
+  if (ts === null || ts === undefined) return null;
+
+  let n;
+
+  if (typeof ts === 'object') {
+    if (typeof ts.toNumber === 'function') {
+      n = ts.toNumber();
+    } else if (typeof ts.low === 'number') {
+      n = (ts.high || 0) * 4294967296 + (ts.low >>> 0);
+    } else {
+      return null;
+    }
+  } else {
+    n = Number(ts);
+  }
+
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+function classify(input, nowSec, cfg) {
+  const c = Object.assign({}, CFG, cfg || {});
+
+  const no = reason => ({
+    ingest: false,
+    reply: false,
+    reason
+  });
+
+  const t = toSeconds(input.ts);
+
+  if (t === null) return no('no_timestamp');
+
+  const age = nowSec - t;
+
+  if (age < -c.futureSkewSec) {
+    return no('future_timestamp');
+  }
+
+  if (input.fromMe) {
+    return no('from_me');
+  }
+
+  if (
+    input.upsertType !== 'notify' &&
+    input.upsertType !== 'append'
+  ) {
+    return no('unknown_type');
+  }
+
+  if (
+    input.upsertType === 'append' &&
+    age > c.appendLiveWindowSec
+  ) {
+    return no('append_history');
+  }
+
+  if (age > c.retentionDays * 86400) {
+    return no('beyond_retention');
+  }
+
+  const live = age <= c.replyMaxAgeSec;
+
+  if (input.isGroup) {
+    return {
+      ingest: true,
+      reply: false,
+      firstSeenSec: t,
+      reason: live ? 'group_live' : 'group_backlog'
+    };
+  }
+
+  return {
+    ingest: true,
+    reply: live,
+    firstSeenSec: t,
+    reason: live ? 'dm_live' : 'dm_missed_offline'
+  };
+}
+
+function compactLog(upsertType, msg, nowSec) {
+  const key = (msg && msg.key) || {};
+  const t = toSeconds(msg && msg.messageTimestamp);
+  const age = t === null ? 'na' : String(nowSec - t) + 's';
+  const jid = key.remoteJid || '';
+  const kind = jid.indexOf('@g.us') !== -1 ? 'group' : 'dm';
+  const id = String(key.id || '').slice(0, 8);
+
+  return (
+    'upsert type=' + upsertType +
+    ' age=' + age +
+    ' chat=' + kind +
+    ' fromMe=' + (key.fromMe ? 1 : 0) +
+    ' id=' + id
+  );
+}
+
+module.exports = {
+  classify,
+  toSeconds,
+  compactLog,
+  CFG
+};
+=== message-utils.js ===
+function unwrapMessage(message) {
+  let current = message || {};
+
+  for (let i = 0; i < 5; i++) {
+    if (current.ephemeralMessage?.message) {
+      current = current.ephemeralMessage.message;
+      continue;
+    }
+
+    if (current.viewOnceMessage?.message) {
+      current = current.viewOnceMessage.message;
+      continue;
+    }
+
+    if (current.viewOnceMessageV2?.message) {
+      current = current.viewOnceMessageV2.message;
+      continue;
+    }
+
+    if (current.viewOnceMessageV2Extension?.message) {
+      current = current.viewOnceMessageV2Extension.message;
+      continue;
+    }
+
+    break;
+  }
+
+  return current;
+}
+
+function extractMessageText(message) {
+  const current = unwrapMessage(message);
+
+  if (!current || typeof current !== 'object') {
+    return '';
+  }
+
+  return String(
+    current.conversation ||
+    current.extendedTextMessage?.text ||
+    current.imageMessage?.caption ||
+    current.videoMessage?.caption ||
+    current.documentMessage?.caption ||
+    ''
+  ).trim();
+}
+
+function getMessageType(message) {
+  const current = unwrapMessage(message);
+
+  if (!current || typeof current !== 'object') {
+    return null;
+  }
+
+  const keys = Object.keys(current);
+
+  return keys.length ? keys[0] : null;
+}
+
+module.exports = {
+  unwrapMessage,
+  extractMessageText,
+  getMessageType
+};
+=== test_ingestPolicy.js ===
+'use strict';
+
+const {
+  classify,
+  toSeconds,
+  compactLog
+} = require('./ingestPolicy');
+
+const NOW = 1800000000;
+const MIN = 60;
+const HOUR = 3600;
+const DAY = 86400;
+
+let pass = 0;
+let fail = 0;
+
+function check(name, cond, detail) {
+  if (cond) {
+    pass++;
+    console.log('PASS  ' + name);
+  } else {
+    fail++;
+    console.log(
+      'FAIL  ' + name +
+      (detail ? '  -> ' + JSON.stringify(detail) : '')
+    );
+  }
+}
+
+const mk = o =>
+  Object.assign({
+    upsertType: 'notify',
+    fromMe: false,
+    isGroup: false,
+    ts: NOW
+  }, o);
+
+let r;
+
+r = classify(
+  mk({ isGroup: true, ts: NOW - 30 }),
+  NOW
+);
+check(
+  '1 notify group 30s -> ingest, no reply, group_live',
+  r.ingest && !r.reply && r.reason === 'group_live',
+  r
+);
+
+r = classify(
+  mk({ isGroup: true, ts: NOW - 3 * DAY }),
+  NOW
+);
+check(
+  '2 notify group 3d -> backlog ingest, first_seen = msg time',
+  r.ingest &&
+  !r.reply &&
+  r.reason === 'group_backlog' &&
+  r.firstSeenSec === NOW - 3 * DAY,
+  r
+);
+
+r = classify(
+  mk({
+    upsertType: 'append',
+    isGroup: true,
+    ts: NOW - 3 * DAY
+  }),
+  NOW
+);
+check(
+  '3 append group 3d -> ignored append_history',
+  !r.ingest && r.reason === 'append_history',
+  r
+);
+
+r = classify(
+  mk({
+    upsertType: 'append',
+    ts: NOW - 20
+  }),
+  NOW
+);
+check(
+  '4 append DM 20s -> ingest + reply (reconnect race)',
+  r.ingest && r.reply,
+  r
+);
+
+r = classify(
+  mk({ ts: NOW - 2 * HOUR }),
+  NOW
+);
+check(
+  '5 notify DM 2h -> ingest, no reply, dm_missed_offline',
+  r.ingest &&
+  !r.reply &&
+  r.reason === 'dm_missed_offline',
+  r
+);
+
+r = classify(
+  mk({ ts: NOW - 4 * MIN }),
+  NOW
+);
+check(
+  '6 notify DM 4min -> ingest + reply',
+  r.ingest &&
+  r.reply &&
+  r.reason === 'dm_live',
+  r
+);
+
+r = classify(
+  mk({
+    isGroup: true,
+    ts: NOW - 25 * DAY
+  }),
+  NOW
+);
+check(
+  '7 notify group 25d -> beyond_retention',
+  !r.ingest && r.reason === 'beyond_retention',
+  r
+);
+
+r = classify(
+  mk({ fromMe: true }),
+  NOW
+);
+check(
+  '8 fromMe -> ignored',
+  !r.ingest &&
+  !r.reply &&
+  r.reason === 'from_me',
+  r
+);
+
+const t = NOW - 10;
+
+check('9a timestamp number', toSeconds(t) === t);
+check('9b timestamp string', toSeconds(String(t)) === t);
+check(
+  '9c timestamp Long-like (toNumber)',
+  toSeconds({ toNumber: () => t }) === t
+);
+check(
+  '9d timestamp Long-like (low/high)',
+  toSeconds({ low: t, high: 0 }) === t
+);
+
+r = classify(
+  mk({ ts: undefined }),
+  NOW
+);
+check(
+  '10 missing timestamp -> ignored',
+  !r.ingest && r.reason === 'no_timestamp',
+  r
+);
+
+r = classify(
+  mk({ ts: NOW + HOUR }),
+  NOW
+);
+check(
+  '11 timestamp 1h in future -> ignored',
+  !r.ingest && r.reason === 'future_timestamp',
+  r
+);
+
+r = classify(
+  mk({
+    upsertType: 'append',
+    ts: NOW - 700
+  }),
+  NOW
+);
+check(
+  'extra: append DM 700s -> treated as history',
+  !r.ingest && r.reason === 'append_history',
+  r
+);
+
+r = classify(
+  mk({ upsertType: 'weird' }),
+  NOW
+);
+check(
+  'extra: unknown upsert type -> ignored',
+  !r.ingest && r.reason === 'unknown_type',
+  r
+);
+
+r = classify(
+  mk({
+    isGroup: true,
+    ts: NOW - 25 * DAY
+  }),
+  NOW,
+  { retentionDays: 30 }
+);
+check(
+  'extra: retentionDays override respected',
+  r.ingest && r.reason === 'group_backlog',
+  r
+);
+
+const line = compactLog(
+  'notify',
+  {
+    key: {
+      remoteJid: '123@g.us',
+      id: 'ABCDEF1234567890',
+      fromMe: false
+    },
+    messageTimestamp: NOW - 12
+  },
+  NOW
+);
+
+check(
+  'extra: compactLog has no message text and shows age/chat',
+  line.indexOf('age=12s') !== -1 &&
+  line.indexOf('chat=group') !== -1,
+  line
+);
+
+console.log('\n' + pass + ' passed, ' + fail + ' failed');
+console.log(
+  'Not covered here: duplicate message ID and history batch DB behavior.'
+);
+
+process.exit(fail ? 1 : 0);
+=== test-db.js ===
+const {
+  getOrCreateLead,
+  updateLeadInfo,
+  addMessage
+} = require('./db');
+
+const phone = '+923001234567';
+
+console.log('Initial lead:');
+console.log(getOrCreateLead(phone));
+
+addMessage(phone, 'incoming', 'Hi, I want a house');
+
+updateLeadInfo(phone, {
+  name: 'Ahmed',
+  interest: 'House',
+  budget: '2 crore',
+  area: 'DHA Lahore',
+  timeline: '3 months'
+});
+
+addMessage(
+  phone,
+  'outgoing',
+  'Thanks Ahmed. I will help you find suitable properties.'
+);
+
+console.log('\nUpdated lead:');
+console.log(getOrCreateLead(phone));
