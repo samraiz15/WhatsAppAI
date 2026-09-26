@@ -49,10 +49,8 @@ try {
   assert.strictEqual(rows.count, 1);
 
   // 3. First processor claims the message.
-  assert.strictEqual(
-    claimWhatsappMessage('task02-duplicate'),
-    true
-  );
+  const duplicateToken = claimWhatsappMessage('task02-duplicate');
+  assert.ok(duplicateToken);
 
   // 4. Second processor cannot claim an active message.
   assert.strictEqual(
@@ -62,7 +60,7 @@ try {
 
   // 5. Completed messages cannot be processed again.
   assert.strictEqual(
-    completeWhatsappMessage('task02-duplicate'),
+    completeWhatsappMessage('task02-duplicate', duplicateToken),
     true
   );
 
@@ -80,23 +78,19 @@ try {
   });
 
   assert.strictEqual(failed.inserted, true);
+  const failedToken = claimWhatsappMessage('task02-failed');
+  assert.ok(failedToken);
+
   assert.strictEqual(
-    claimWhatsappMessage('task02-failed'),
+    failWhatsappMessage('task02-failed', 'test failure', failedToken),
     true
   );
 
-  assert.strictEqual(
-    failWhatsappMessage('task02-failed', 'test failure'),
-    true
-  );
+  const retryToken = claimWhatsappMessage('task02-failed');
+  assert.ok(retryToken);
 
   assert.strictEqual(
-    claimWhatsappMessage('task02-failed'),
-    true
-  );
-
-  assert.strictEqual(
-    completeWhatsappMessage('task02-failed'),
+    completeWhatsappMessage('task02-failed', retryToken),
     true
   );
 

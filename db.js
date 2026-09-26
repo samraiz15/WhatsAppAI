@@ -88,15 +88,24 @@ db.exec(`
   ON whatsapp_messages(status);
 `);
 
-const whatsappMessageColumns = db
-  .prepare('PRAGMA table_info(whatsapp_messages)')
-  .all()
-  .map(column => column.name);
+const whatsappMessageColumns = new Set(
+  db
+    .prepare('PRAGMA table_info(whatsapp_messages)')
+    .all()
+    .map(column => column.name)
+);
 
-if (!whatsappMessageColumns.includes('claimed_at')) {
+if (!whatsappMessageColumns.has('claimed_at')) {
   db.exec(`
     ALTER TABLE whatsapp_messages
     ADD COLUMN claimed_at TEXT
+  `);
+}
+
+if (!whatsappMessageColumns.has('claim_token')) {
+  db.exec(`
+    ALTER TABLE whatsapp_messages
+    ADD COLUMN claim_token TEXT
   `);
 }
 
@@ -123,6 +132,7 @@ const claimWhatsappMessageStmt = db.prepare(`
   UPDATE whatsapp_messages
   SET status = 'processing',
       claimed_at = CURRENT_TIMESTAMP,
+      claim_token = ?,
       error = NULL
   WHERE message_id = ?
     AND (
@@ -141,19 +151,23 @@ const completeWhatsappMessageStmt = db.prepare(`
   UPDATE whatsapp_messages
   SET status = 'processed',
       claimed_at = NULL,
+      claim_token = NULL,
       error = NULL,
       processed_at = CURRENT_TIMESTAMP
   WHERE message_id = ?
     AND status = 'processing'
+    AND claim_token = ?
 `);
 
 const failWhatsappMessageStmt = db.prepare(`
   UPDATE whatsapp_messages
   SET status = 'failed',
       claimed_at = NULL,
+      claim_token = NULL,
       error = ?
   WHERE message_id = ?
     AND status = 'processing'
+    AND claim_token = ?
 `);
 
 function registerWhatsappMessage({
@@ -188,21 +202,27 @@ function registerWhatsappMessage({
 }
 
 function claimWhatsappMessage(messageId) {
-  return claimWhatsappMessageStmt.run(
-    String(messageId || '').trim()
-  ).changes > 0;
+  const crypto = require('crypto');
+  const id = String(messageId || '').trim();
+  const token = crypto.randomUUID();
+
+  const result = claimWhatsappMessageStmt.run(token, id);
+
+  return result.changes > 0 ? token : false;
 }
 
-function completeWhatsappMessage(messageId) {
+function completeWhatsappMessage(messageId, claimToken) {
   return completeWhatsappMessageStmt.run(
-    String(messageId || '').trim()
+    String(messageId || '').trim(),
+    String(claimToken || '')
   ).changes > 0;
 }
 
-function failWhatsappMessage(messageId, error) {
+function failWhatsappMessage(messageId, error, claimToken) {
   return failWhatsappMessageStmt.run(
     String(error || '').slice(0, 1000),
-    String(messageId || '').trim()
+    String(messageId || '').trim(),
+    String(claimToken || '')
   ).changes > 0;
 }
 

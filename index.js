@@ -240,7 +240,9 @@ async function start() {
         continue;
       }
 
-      if (!claimWhatsappMessage(messageId)) {
+      const whatsappClaimToken = claimWhatsappMessage(messageId);
+
+      if (!whatsappClaimToken) {
         console.log('MESSAGE CLAIM FAILED:', messageId);
         continue;
       }
@@ -262,14 +264,14 @@ async function start() {
         messageId,
         policy.reason
       );
-      completeWhatsappMessage(messageId);
+      completeWhatsappMessage(messageId, whatsappClaimToken);
       continue;
     }
 
     const phone = message.key.remoteJidAlt || message.key.remoteJid;
 
     if (!phone) {
-      completeWhatsappMessage(messageId);
+      completeWhatsappMessage(messageId, whatsappClaimToken);
       continue;
     }
 
@@ -282,7 +284,7 @@ async function start() {
     const normalizedPhone = phone.replace('@lid', '@s.whatsapp.net');
 
     if (message.key.fromMe && !ownerPhone) {
-      completeWhatsappMessage(messageId);
+      completeWhatsappMessage(messageId, whatsappClaimToken);
       continue;
     }
 
@@ -295,13 +297,13 @@ async function start() {
 
     if (ownerCommand && normalizedPhone !== ownerPhone) {
       console.log('COMMAND BLOCKED: unauthorized number', phone);
-      completeWhatsappMessage(messageId);
+      completeWhatsappMessage(messageId, whatsappClaimToken);
       continue;
     }
 
     if (normalizedPhone !== ownerPhone && !phone.endsWith('@g.us')) {
       console.log('CONTACT CHAT BLOCKED:', phone);
-      completeWhatsappMessage(messageId);
+      completeWhatsappMessage(messageId, whatsappClaimToken);
       continue;
     }
 
@@ -314,7 +316,7 @@ async function start() {
 
       if (!ownerPhone) {
         console.log('GROUP SKIPPED: owner identity unavailable');
-        completeWhatsappMessage(messageId);
+        completeWhatsappMessage(messageId, whatsappClaimToken);
         continue;
       }
 
@@ -328,7 +330,7 @@ async function start() {
 
       if (!monitoredGroups.length) {
         console.log('GROUP SKIPPED: no monitored groups configured');
-        completeWhatsappMessage(messageId);
+        completeWhatsappMessage(messageId, whatsappClaimToken);
         continue;
       }
 
@@ -338,7 +340,7 @@ async function start() {
         groupMetadata = await sock.groupMetadata(phone);
       } catch (error) {
         console.error('GROUP METADATA ERROR:', error.message);
-        failWhatsappMessage(messageId, error.message);
+        failWhatsappMessage(messageId, error.message, whatsappClaimToken);
         continue;
       }
 
@@ -412,7 +414,7 @@ async function start() {
 
       if (!monitoredGroup) {
         console.log('GROUP SKIPPED:', groupMetadata.subject || phone);
-        completeWhatsappMessage(messageId);
+        completeWhatsappMessage(messageId, whatsappClaimToken);
         continue;
       }
 
@@ -423,7 +425,7 @@ async function start() {
 
       if (!groupText.trim()) {
         console.log('GROUP MESSAGE SKIPPED: no text');
-        completeWhatsappMessage(messageId);
+        completeWhatsappMessage(messageId, whatsappClaimToken);
         continue;
       }
 
@@ -442,7 +444,7 @@ async function start() {
       );
 
       console.log('GROUP MESSAGE SAVED:', groupMetadata.subject);
-      completeWhatsappMessage(messageId);
+      completeWhatsappMessage(messageId, whatsappClaimToken);
       continue;
     }
 
@@ -450,7 +452,7 @@ async function start() {
 
     if (!text?.trim()) {
       console.log("MESSAGE TYPE:", Object.keys(message.message || {}));
-      completeWhatsappMessage(messageId);
+      completeWhatsappMessage(messageId, whatsappClaimToken);
       continue;
     }
 
@@ -479,7 +481,7 @@ async function start() {
 
       if (!result.reply) {
         console.log('NO REPLY NEEDED');
-        completeWhatsappMessage(messageId);
+        completeWhatsappMessage(messageId, whatsappClaimToken);
         continue;
       }
 
@@ -487,13 +489,13 @@ async function start() {
         text: result.reply
       });
 
-      completeWhatsappMessage(messageId);
+      completeWhatsappMessage(messageId, whatsappClaimToken);
 
       console.log('SENT');
     } catch (error) {
       console.error('Message error:', error.message);
 
-      failWhatsappMessage(messageId, error.message);
+      failWhatsappMessage(messageId, error.message, whatsappClaimToken);
 
       if (policy.reply) {
         await sock.sendMessage(phone, {
