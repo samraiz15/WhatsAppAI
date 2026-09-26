@@ -221,6 +221,8 @@ async function start() {
       message.message?.documentMessage?.caption ||
       '';
 
+    let whatsappClaimToken;
+
     try {
       const registration = registerWhatsappMessage({
         messageId,
@@ -240,7 +242,7 @@ async function start() {
         continue;
       }
 
-      const whatsappClaimToken = claimWhatsappMessage(messageId);
+      whatsappClaimToken = claimWhatsappMessage(messageId);
 
       if (!whatsappClaimToken) {
         console.log('MESSAGE CLAIM FAILED:', messageId);
