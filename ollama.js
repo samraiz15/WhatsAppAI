@@ -11,6 +11,7 @@ function askOllama(prompt, history = [], memory = {}) {
     const parkViewContext = getParkViewContext(prompt, 1500);
 
     const body = JSON.stringify({
+    keep_alive: 0,
       model: MODEL,
       prompt: `
 ${getBrainPrompt().slice(0, 1200)}
