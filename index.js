@@ -10,7 +10,8 @@ const P = require('pino');
 const { processMessage } = require('./conversation');
 const {
   getMonitoredGroups,
-  setMonitoredGroupJid
+  setMonitoredGroupJid,
+  isContactAllowed
 } = require('./groups');
 const {
   addGroupMessage,
@@ -370,15 +371,23 @@ async function start() {
       continue;
     }
 
-    // During the demo window, allow all individual WhatsApp contacts.
-    // Owner-only commands remain protected above.
+    // During the demo window, allow individual WhatsApp contacts.
+    // Outside demo mode, require the approved customer allowlist.
     if (
       demoConfig.demoMode &&
       isDemoActive() &&
       !phone.endsWith('@g.us')
     ) {
       console.log('DEMO CONTACT ALLOWED:', normalizedPhone);
-    } else if (normalizedPhone !== ownerPhone && !phone.endsWith('@g.us')) {
+    } else if (
+      normalizedPhone !== ownerPhone &&
+      !phone.endsWith('@g.us') &&
+      !isContactAllowed(ownerPhone, normalizedPhone)
+    ) {
+      console.log('CONTACT CHAT BLOCKED:', phone);
+      completeWhatsappMessage(messageId);
+      continue;
+    }
       console.log('CONTACT CHAT BLOCKED:', phone);
       completeWhatsappMessage(messageId);
       continue;
