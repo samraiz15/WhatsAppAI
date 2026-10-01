@@ -587,8 +587,152 @@ const PARK_VIEW_CITY_BRAIN = {
     'Never pretend live inventory is available unless the system actually has live inventory.',
     'Never pretend a property is available because a portal lists it.'
   ]
-};
 
-module.exports = PARK_VIEW_CITY_BRAIN;
+
+
+,
+
+
+  additional_market_and_property_facts: {
+
+    current_market_signal: {
+      rule:
+        'Portal inventory is broad and changes frequently. Treat listing counts and asking prices as current observations, not transaction evidence.',
+      current_5_marla_house_inventory:
+        'Zameen currently shows substantial 5-marla house inventory across many Park View City blocks, not only Crystal, Diamond and Platinum.',
+      active_blocks_observed: [
+        'Tulip Overseas',
+        'Tulip Extension',
+        'Executive',
+        'Crystal',
+        'Tulip',
+        'Platinum',
+        'Jade Extension',
+        'Diamond',
+        'Rose',
+        'Overseas',
+        'Topaz',
+        'Jade',
+        'Topaz Extension',
+        'Sapphire',
+        'Imperial',
+        'Jasmine'
+      ]
+    },
+
+    current_asking_price_signal: {
+      five_marla_houses:
+        'Current portal asking prices vary materially by block, construction and location. Recent listings show roughly 1.6 crore to 2.4 crore+ across several blocks.',
+      important:
+        'Do not use the highest or lowest listing as the market price. Compare similar houses by block, age, condition, location and specifications.'
+    },
+
+    plot_market_signal: {
+      rule:
+        'Current listings also show active 5-marla plot inventory across multiple blocks, with substantial price differences between blocks.',
+      observed_blocks: [
+        'Crystal',
+        'Platinum',
+        'Silver',
+        'Pearl',
+        'Tulip',
+        'Executive',
+        'Jade',
+        'Overseas'
+      ],
+      important:
+        'Plot price must be separated from house price and checked for possession/payment/transfer status.'
+    },
+
+    rental_market_signal: {
+      rule:
+        'Rental inventory exists across multiple blocks, including full houses and portions.',
+      observed: [
+        'Jade',
+        'Platinum',
+        'Tulip Overseas',
+        'Tulip Extension'
+      ],
+      important:
+        'Use live/current rental listings when discussing rent; do not assume one society-wide rental rate.'
+    },
+
+    property_status_terms: {
+      rule:
+        'When a listing says paid, non-paid, half-paid, full-paid, transfer-free or possession-paid, clarify exactly what has been paid and what remains payable before comparing prices.',
+      buyer_check:
+        'Always separate property price from possession charges, transfer fees, government taxes, outstanding dues and other applicable charges.'
+    },
+
+    development_and_block_logic: {
+      rule:
+        'Park View City contains many blocks and extensions at different development stages. Do not treat the whole society as one uniform market.',
+      important:
+        'For any property recommendation identify exact block, street, property type, size, possession/development status and documentation before comparing.'
+    },
+
+    location_and_internal_access: {
+      main_access:
+        'Park View City is connected from Multan Road and has internal connections toward Canal Road.',
+      internal_roads:
+        'Main Boulevard is described as approximately 153 feet wide; internal roads include approximately 30, 40 and 50 feet widths.',
+      rule:
+        'Road width and exact internal location can materially affect property desirability; verify the actual street instead of assuming every road is the same.'
+    },
+
+    amenities: {
+      established_features: [
+        'The Walk commercial area',
+        'ParkView Zoo',
+        'The National School',
+        'parks',
+        'mosques',
+        'commercial areas',
+        'security'
+      ],
+      rule:
+        'Mention amenities as existing only when currently verified; distinguish planned facilities from operational facilities.'
+    },
+
+    approval_precision: {
+      important:
+        'The official ParkView FAQ currently states Jade, Jasmine and Sapphire are LDA approved and describes other blocks as subject to RUDA approval.',
+      topaz:
+        'A separate ParkView-related source states the 10-marla area of Topaz has LDA approval.',
+      agent_rule:
+        'Never describe the entire society as LDA approved. Ask for the exact block, plot/property and current approval/documentation status.'
+    },
+
+    gas_precision: {
+      current_rule:
+        'Sui gas is identified in Jade, Jasmine and Sapphire, with a separate claim for 10-marla Topaz. Other blocks are described as using LPG/local supply.',
+      agent_rule:
+        'Never answer simply "yes, Park View has gas." Ask for the exact block and property.'
+    },
+
+    listing_reliability: {
+      rule:
+        'Portal listings are leads, not proof of availability, ownership, final price or completed transaction.',
+      verification:
+        'Before presenting a property as available, verify with the seller/agent and, where appropriate, confirm documentation and site status.'
+    },
+
+    buyer_decision_data: {
+      minimum_property_identity: [
+        'exact block',
+        'street/location',
+        'plot size',
+        'property type',
+        'house age or construction status',
+        'asking price',
+        'possession status',
+        'utility status',
+        'documentation status'
+      ],
+      minimum_comparison:
+        'Compare at least several genuinely similar properties before judging whether an asking price is reasonable.'
+    }
+  }
+};
 
 module.exports = PARK_VIEW_CITY_BRAIN;

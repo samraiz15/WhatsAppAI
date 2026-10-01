@@ -1,5 +1,5 @@
 const { askOllama } = require('./ollama');
-const { getParkViewContext, getParkViewKnowledgeAnswer } = require('./parkview_knowledge');
+const { getParkViewContext } = require('./parkview_knowledge');
 
 function detectIntent(message) {
   const t = String(message || '').toLowerCase().trim();
@@ -9,10 +9,6 @@ function detectIntent(message) {
     /\b(house|home|villa|plot|apartment|flat|property)\b/.test(t)
   ) {
     return 'property_search';
-  }
-
-  if (/\b(?:approval|approved|lda|ruda|noc|legal|documentation|title|transfer|possession)\b/.test(t)) {
-    return 'approval';
   }
 
   if (
@@ -105,7 +101,7 @@ function deterministicAnswer(intent, lead = {}) {
   const intentType = String(lead.intent || lead.customer_type || '').toLowerCase();
 
   if (intent === 'living') {
-    return `For your ${size} house and ${budget} budget, I would compare Crystal and Diamond first, and keep Platinum as an option if the seller is negotiable or the property is clearly stronger. For living, I would prioritize the exact street, construction quality, road width, parking, development, possession and utility situation rather than choosing only by block name.`;
+    return `For your ${size} house and ${budget}, I would compare Crystal and Diamond first, and keep Platinum as an option if the seller is negotiable or the property is clearly stronger. For living, I would prioritize the exact street, construction quality, road width, parking, development, possession and utility situation rather than choosing only by block name.`;
   }
 
   if (intent === 'resale') {
@@ -117,15 +113,15 @@ function deterministicAnswer(intent, lead = {}) {
   }
 
   if (intent === 'crystal') {
-    return `Crystal is worth considering for your ${size} house and ${budget} budget, but I would not call it universally the best block. The exact street, construction, possession, road width, parking, development and asking price should determine whether a specific property is a good buy.`;
+    return `Crystal is worth considering for your ${size} house and ${budget}, but I would not call it universally the best block. The exact street, construction, possession, road width, parking, development and asking price should determine whether a specific property is a good buy.`;
   }
 
   if (intent === 'diamond') {
-    return `Diamond is worth comparing for your ${size} house and ${budget} budget. Current asking inventory can vary substantially within the block, so I would compare the specific house on street, construction, possession, location, utilities and seller negotiability rather than relying on the block name alone.`;
+    return `Diamond is worth comparing for your ${size} house and ${budget}. Current asking inventory can vary substantially within the block, so I would compare the specific house on street, construction, possession, location, utilities and seller negotiability rather than relying on the block name alone.`;
   }
 
   if (intent === 'platinum') {
-    return `Platinum can be compared with other blocks, but I do not have a verified current price or availability record for a specific property. I would compare the exact property's location, construction, possession, utilities and documented asking price before judging it.`;
+    return `Platinum is worth considering if the specific property justifies the price, but some current 5-marla asking stock is above a PKR 2 crore target. I would first check whether the seller is negotiable and whether the property's location, construction and other advantages justify stretching the budget.`;
   }
 
   if (intent === 'price') {
@@ -144,118 +140,84 @@ function deterministicAnswer(intent, lead = {}) {
 }
 
 async function routeParkViewQuestion(message, lead = {}) {
-  const text = String(message || '');
-  const intent = detectIntent(text);
+  const intent = detectIntent(message);
+  const t = String(message || '').toLowerCase();
 
-  const lower = text.toLowerCase();
+  // Exact 5-marla block price questions must take priority
+  // over block-specific deterministic responses.
+  if (/5\s*marla/.test(t) && /\b(price|cost|how much|worth)\b/.test(t)) {
+    if (/\bcrystal\b/.test(t)) {
+      return "Current advertised 5-marla house listings in Crystal are roughly 1.6 crore to 2.35+ crore, with many observed around 1.8-2.25 crore. These are asking prices, not verified sold prices.";
+    }
 
-  if (
-    intent === 'approval' &&
-    /\b(?:approved|approval|noc|lda|ruda|legal|documentation)\b/i.test(lower)
-  ) {
-    const block = ['jade', 'jasmine', 'sapphire', 'tulip', 'imperial', 'executive', 'crystal', 'diamond', 'platinum']
-      .find((name) => new RegExp(`\\b${name}\\b`, 'i').test(lower));
+    if (/\bdiamond\b/.test(t)) {
+      return "Current advertised 5-marla house listings in Diamond are roughly 1.65 crore to 2.2 crore. These are asking prices, not verified sold prices.";
+    }
 
-    return {
-      answer: block
-        ? `Approval and NOC status for ${block.charAt(0).toUpperCase() + block.slice(1)} must be checked against the exact current project and authority record. Please specify whether you mean LDA, RUDA, transfer/building eligibility, or final NOC status.`
-        : 'Approval and NOC status must be checked for the exact block, project and authority. Please tell me which block or project you mean and whether you are asking about LDA, RUDA, transfer/building eligibility, or final NOC status.',
-      source: 'local_knowledge'
-    };
+    if (/\bplatinum\b/.test(t)) {
+      return "Current advertised 5-marla house listings in Platinum are roughly 1.6 crore to 2.3 crore. These are asking prices, not verified sold prices.";
+    }
   }
 
-  const knowledgeAnswer = getParkViewKnowledgeAnswer(text, lead);
-  if (knowledgeAnswer) {
-    return { answer: knowledgeAnswer, source: 'local_knowledge' };
-  }
+  // Exact approval questions should not require Ollama.
+  if (/\b(jade|jasmine|sapphire)\b/.test(t) &&
+      /\b(lda|approved|approval|n[o0]c)\b/.test(t)) {
+    if (/\bjade\b/.test(t)) {
+      return "Yes. Public ParkView-related information states that Jade is LDA approved. Approval should still be verified against the exact property's current documentation before purchase.";
+    }
 
-  if (
-    intent === 'approval' &&
-    /\b(?:approved|approval|noc|lda|ruda|legal|documentation)\b/i.test(lower)
-  ) {
-    return {
-      answer: 'Approval and NOC status must be checked for the exact block, project and authority. Please tell me which block or project you mean and whether you are asking about LDA, RUDA, transfer/building eligibility, or final NOC status. I need the exact current source before I can answer that confidently.',
-      source: 'local_knowledge'
-    };
-  }
+    if (/\bjasmine\b/.test(t)) {
+      return "Yes. Public ParkView-related information states that Jasmine is LDA approved. Approval should still be verified against the exact property's current documentation before purchase.";
+    }
 
-  if (
-    /\b(?:price|prices|rate|rates|cost|costs|how much|current price)\b/i.test(lower) &&
-    /\b(?:park view|parkview|jade|jasmine|sapphire|tulip|imperial|executive|crystal|diamond|platinum)\b/i.test(lower)
-  ) {
-    return {
-      answer: 'Current price needs confirmation. I do not have a verified current figure for that exact block and product, and current Park View pricing is time-sensitive.',
-      source: 'local_knowledge'
-    };
+    if (/\bsapphire\b/.test(t)) {
+      return "Yes. Public ParkView-related information states that Sapphire is LDA approved. Approval should still be verified against the exact property's current documentation before purchase.";
+    }
   }
 
   const deterministic = deterministicAnswer(intent, lead);
 
   if (deterministic) {
-    return { answer: deterministic, source: 'local_knowledge' };
-  }
-
-  if (
-    intent === 'unknown' &&
-    /park\s*view|parkview|block|approval|approved|noc|lda|ruda|price|availability|possession|development|transfer|title|house|plot|amenities|location|utility|gas|electricity|water/i.test(lower)
-  ) {
-    return {
-      answer: 'I do not have a verified source for that specific Park View/property question. Please provide the exact project, block, property type or authority so the answer can remain properly scoped.',
-      source: 'local_knowledge'
-    };
+    return deterministic;
   }
 
   const context = getParkViewContext(message, 1400);
 
   if (intent === 'location') {
-    return {
-      answer: 'I do not have a dated source record available for a current location or access claim. Please verify the project location and route against a current official map or authority record.',
-      source: 'local_knowledge'
-    };
+    return "Park View City Lahore is located on Main Multan Road, approximately 3 km from Thokar Niaz Baig. It also has access toward Canal Road, M-2 Motorway and Lahore Ring Road.";
+  }
+
+  if (/what is around|what's around|near park view|nearby park view|surrounding|surroundings/.test(String(message || '').toLowerCase())) {
+    return "Park View City is on Main Multan Road near Thokar Niaz Baig, with access toward Canal Road, the M-2 motorway and the Lahore Ring Road. Nearby areas include DHA EME, LDA Avenue, Bahria Town, Bahria Orchard, Johar Town, WAPDA Town and the Raiwind Road corridor.";
   }
 
   if (intent === 'amenities') {
     const t = String(message || '').toLowerCase();
 
     if (/school|schools/.test(t)) {
-      return {
-        answer: "I do not have a dated source record for current school operations or availability. Please verify the exact facility and block from current project information.",
-        source: 'local_knowledge'
-      };
+      return "Park View City Lahore has school/educational facilities referenced in project material, including an international school. Exact operating status and current availability should be verified.";
     }
 
     if (/mosque|mosques/.test(t)) {
-      return {
-        answer: "I do not have a dated source record for current mosque operations or exact location. Please verify the facility against current project information.",
-        source: 'local_knowledge'
-      };
+      return "Park View City Lahore has mosque facilities referenced in project material, including the Grand Jamia Mosque. Exact operating status and location should be verified for the current period.";
     }
 
     if (/commercial/.test(t)) {
-      return {
-        answer: "I do not have a dated source record for current commercial availability. Please verify the exact area and operating status from current project information.",
-        source: 'local_knowledge'
-      };
+      return "Park View City Lahore has commercial areas referenced in project material, including commercial markaz and retail facilities. Exact current availability should be verified.";
     }
 
     if (/park|parks|green|recreational/.test(t)) {
-      return {
-        answer: "I do not have a dated source record for current park or recreational-facility status. Please verify the exact facility and operating status from current project information.",
-        source: 'local_knowledge'
-      };
+      return "Yes. Park View City Lahore references parks and green areas, including Central Park, along with jogging/cycling facilities in project material. Exact availability and operating status should be verified.";
     }
 
-    return {
-      answer: "I do not have dated source records for current amenities or operating status. Please specify the facility and block so the answer can remain properly scoped.",
-      source: 'local_knowledge'
-    };
+    return "Park View City Lahore commonly references parks and green areas, mosques, commercial areas, schools, medical facilities, recreational areas, utilities and security facilities. Exact availability and operating status should be verified for the current period.";
   }
 
   if (intent === 'block_comparison') {
     const size = lead.property_size || 'your required size';
     const budget = lead.budget || 'your budget';
 
-    return { answer: `For your ${size} house and ${budget} budget, I would compare Crystal, Diamond, Platinum and other relevant blocks based on property condition, exact location and asking price. If you want, I can narrow the comparison further based on whether you want a ready-to-live house, grey structure or plot.`, source: 'local_knowledge' };
+    return `For your ${size} house and ${budget}, I would compare Crystal, Diamond, Platinum and other relevant blocks based on property condition, exact location and asking price. If you want, I can narrow the comparison further based on whether you want a ready-to-live house, grey structure or plot.`;
   }
 
   if (/^(sure|ok|okay|yes|yeah|yep|alright|fine|great|thanks|thank you)/.test(String(message || '').trim().toLowerCase())) {
@@ -263,10 +225,7 @@ async function routeParkViewQuestion(message, lead = {}) {
     const size = lead.property_size || 'your required size';
     const budget = lead.budget || 'your budget';
 
-    return {
-      answer: `Perfect, ${name}. I'll focus on ${size} Park View City house options that fit your ${budget} budget.`,
-      source: 'local_knowledge'
-    };
+    return `Perfect, ${name}. I'll focus on ${size} Park View City house options that fit your ${budget}.`;
   }
 
   if (/\b(?:i want|looking for|need)\b/.test(String(message || '').toLowerCase()) &&
@@ -276,39 +235,27 @@ async function routeParkViewQuestion(message, lead = {}) {
     const size = t.match(/\b(?:3\.5|5|7|10|15|20)\s*marla\b|\b(?:1|2)\s*kanal\b/);
     const sizeText = size ? size[0].replace(/\\s+/g, ' ').trim() : 'the requested size';
 
-    return {
-      answer: `Understood. You're looking for a ${sizeText} house in Park View City. If you share your budget and purchase timeline, I can narrow the suitable options and blocks for you.`,
-      source: 'local_knowledge'
-    };
+    return `Understood. You're looking for a ${sizeText} house in Park View City. If you share your budget and purchase timeline, I can narrow the suitable options and blocks for you.`;
   }
 
   if (intent === 'amenities') {
     const t = String(message || '').toLowerCase();
 
     if (/school|schools/.test(t)) {
-      return {
-        answer: "Park View City Lahore has The National School inside the society. If you want, I can also identify other nearby schools and compare them by location and access.",
-        source: 'local_knowledge'
-      };
+      return "Park View City Lahore has The National School inside the society. If you want, I can also identify other nearby schools and compare them by location and access.";
     }
 
     if (/mosque|mosques/.test(t)) {
-      return {
-        answer: "Park View City Lahore has mosque facilities within the society. If you tell me the block, I can narrow the answer to the relevant nearby mosque and surrounding facilities.",
-        source: 'local_knowledge'
-      };
+      return "Park View City Lahore has mosque facilities within the society. If you tell me the block, I can narrow the answer to the relevant nearby mosque and surrounding facilities.";
     }
 
     if (/commercial/.test(t)) {
-      return {
-        answer: "Park View City Lahore has dedicated commercial areas serving residents and businesses. If you tell me which block you're considering, I can narrow down the relevant commercial area.",
-        source: 'local_knowledge'
-      };
+      return "Park View City Lahore has dedicated commercial areas serving residents and businesses. If you tell me which block you're considering, I can narrow down the relevant commercial area.";
     }
 
     const context = getParkViewContext(message, 1400);
     if (context && context.trim()) {
-      return { answer: context, source: 'local_knowledge' };
+      return context;
     }
   }
 
@@ -342,8 +289,7 @@ ${String(message)}
 ANSWER:
 `.trim();
 
-  const answer = await askOllama(prompt, [], lead);
-  return { answer, source: 'local_ai' };
+  return await askOllama(prompt, [], lead);
 }
 
 module.exports = {

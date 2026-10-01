@@ -13,19 +13,20 @@ const {
   setMonitoredGroupJid,
   isContactAllowed
 } = require('./groups');
-const {
-  addGroupMessage,
-  registerWhatsappMessage,
-  claimWhatsappMessage,
-  completeWhatsappMessage,
-  failWhatsappMessage,
-  hasInboundMessageForPhone
-} = require('./db');
-const { extractMessageText, safeLogValue } = require('./message-utils');
+const { addGroupMessage, registerWhatsappMessage, claimWhatsappMessage, completeWhatsappMessage, failWhatsappMessage } = require('./db');
+const { extractMessageText } = require('./message-utils');
 const { classify, compactLog } = require('./ingestPolicy');
-const demoConfig = require('./demo-config');
 
 const AUTH_DIR = './pairing-auth';
+
+// Temporary 3-day demo: allow all customer DMs.
+// Owner commands remain owner-only.
+const DEMO_DM_ENABLED = true;
+const DEMO_DM_EXPIRES_AT = new Date('2026-10-04T01:18:00+05:00').getTime();
+
+function isDemoDmActive() {
+  return DEMO_DM_ENABLED && Date.now() < DEMO_DM_EXPIRES_AT;
+}
 
 const CONNECTION_STATES = Object.freeze({
   STARTING: 'STARTING',
@@ -40,39 +41,23 @@ let connectionState = CONNECTION_STATES.DISCONNECTED;
 let startInProgress = false;
 let reconnectTimer = null;
 
-const messageRateState = new Map();
+// Fail-closed outbound DM authorization.
+// A number must first send an eligible inbound DM during this
+// connection session before the bot may send anything to it.
+const inboundDmAuthorization = new Set();
 
-function isDemoActive() {
-  if (!demoConfig.demoMode) return true;
-
-  const start = new Date(demoConfig.demoStart).getTime();
-  const durationMs = demoConfig.demoDurationDays * 24 * 60 * 60 * 1000;
-  const now = Date.now();
-
-  return Number.isFinite(start) &&
-    now >= start &&
-    now < start + durationMs;
+function authorizeInboundDm(jid) {
+  if (jid && jid.endsWith('@s.whatsapp.net')) {
+    inboundDmAuthorization.add(jid);
+  }
 }
 
-function isRateLimited(phone) {
-  if (!demoConfig.demoMode) return false;
-
-  const now = Date.now();
-  const windowMs = 60 * 1000;
-  const timestamps = messageRateState.get(phone) || [];
-
-  const recent = timestamps.filter(
-    timestamp => now - timestamp < windowMs
+function canSendOutboundDm(jid) {
+  return Boolean(
+    jid &&
+    jid.endsWith('@s.whatsapp.net') &&
+    inboundDmAuthorization.has(jid)
   );
-
-  if (recent.length >= demoConfig.maxMessagesPerMinute) {
-    messageRateState.set(phone, recent);
-    return true;
-  }
-
-  recent.push(now);
-  messageRateState.set(phone, recent);
-  return false;
 }
 
 async function start() {
@@ -136,6 +121,8 @@ async function start() {
         reconnectTimer = null;
       }
 
+      inboundDmAuthorization.clear();
+      console.log('OUTBOUND DM AUTHORIZATION RESET: new connection session');
       console.log('Connection:', connection, '| State:', connectionState);
     }
 
@@ -213,28 +200,16 @@ async function start() {
       }
 
       const messageId = message.key?.id;
-      const isBotMessage = message.key?.fromMe === true;
 
       if (!messageId) {
         console.log('MESSAGE SKIPPED: no message id');
         continue;
       }
 
-      // Bot-originated direct messages must never be treated as customer input,
-      // blocked, or reprocessed. They are allowed to exist in the ledger only.
-      if (isBotMessage) {
-        console.log('BOT MESSAGE: ALLOWED FOR LEDGER ONLY; SKIPPED FROM CUSTOMER PROCESSING:', messageId);
-        completeWhatsappMessage(messageId);
-        continue;
-      }
-
       const policy = classify(
         {
           ts: message.messageTimestamp,
-          fromMe: isBotMessage,
-          text: extractMessageText(message.message),
-          demoMode: demoConfig.demoMode,
-          demoActive: demoConfig.demoMode && isDemoActive(),
+          fromMe: message.key?.fromMe === true,
           isGroup: String(
             message.key?.remoteJid ||
             message.key?.remoteJidAlt ||
@@ -245,9 +220,7 @@ async function start() {
         nowSec
       );
 
-      if (!isBotMessage) {
-        console.log('INGEST POLICY:', messageId, policy);
-      }
+      console.log('INGEST POLICY:', messageId, policy);
 
       if (!policy.ingest) {
         console.log(
@@ -260,7 +233,7 @@ async function start() {
 
       console.log(
         'RAW MESSAGE:',
-        safeLogValue(message)
+        JSON.stringify(message, null, 2)
       );
 
       if (!message?.message) {
@@ -280,16 +253,13 @@ async function start() {
       '';
 
     try {
-      const inboundPhone = message.key?.remoteJidAlt || message.key?.remoteJid || null;
-      const participantJid =
-        message.key?.participantAlt ||
-        message.key?.participant ||
-        null;
-
       const registration = registerWhatsappMessage({
         messageId,
-        remoteJid: inboundPhone ? inboundPhone.replace('@lid', '@s.whatsapp.net') : null,
-        participantJid: participantJid ? participantJid.replace('@lid', '@s.whatsapp.net') : null,
+        remoteJid: message.key?.remoteJid || null,
+        participantJid:
+          message.key?.participantAlt ||
+          message.key?.participant ||
+          null,
         fromMe: message.key?.fromMe === true,
         messageType,
         messageText: messageTextForLog || null,
@@ -354,43 +324,35 @@ async function start() {
         String(textPreview || '').trim()
       );
 
-    console.log('OWNER DEBUG:', {
-      phone,
-      normalizedPhone,
-      ownerPhone,
-      textPreview
-    });
-
-    if (
-      ownerCommand &&
-      normalizedPhone !== ownerPhone &&
-      !(demoConfig.demoMode && isDemoActive())
-    ) {
+    if (ownerCommand && normalizedPhone !== ownerPhone) {
       console.log('COMMAND BLOCKED: unauthorized number', phone);
       completeWhatsappMessage(messageId);
       continue;
     }
 
-    // During the demo window, allow individual WhatsApp contacts.
-    // Outside demo mode, require the approved customer allowlist.
     if (
-      demoConfig.demoMode &&
-      isDemoActive() &&
-      !phone.endsWith('@g.us')
-    ) {
-      console.log('DEMO CONTACT ALLOWED:', normalizedPhone);
-    } else if (
       normalizedPhone !== ownerPhone &&
       !phone.endsWith('@g.us') &&
+      !isDemoDmActive() &&
       !isContactAllowed(ownerPhone, normalizedPhone)
     ) {
       console.log('CONTACT CHAT BLOCKED:', phone);
       completeWhatsappMessage(messageId);
       continue;
     }
-      console.log('CONTACT CHAT BLOCKED:', phone);
-      completeWhatsappMessage(messageId);
-      continue;
+
+    // Only a fresh, eligible inbound DM authorizes replies to this number.
+    if (
+      !isGroupMessage &&
+      policy.reply &&
+      !message.key.fromMe &&
+      connectionState === CONNECTION_STATES.CONNECTED
+    ) {
+      authorizeInboundDm(normalizedPhone);
+
+      if (canSendOutboundDm(normalizedPhone)) {
+        console.log('OUTBOUND DM AUTHORIZED:', normalizedPhone);
+      }
     }
 
     if (phone.endsWith('@g.us')) {
@@ -542,47 +504,6 @@ async function start() {
       continue;
     }
 
-    if (
-      demoConfig.demoMode &&
-      text.length > demoConfig.maxMessageLength
-    ) {
-      console.log(
-        'DEMO MESSAGE TOO LONG:',
-        messageId,
-        text.length
-      );
-
-      completeWhatsappMessage(messageId);
-
-      await sock.sendMessage(phone, {
-        text: 'Your message is too long. Please send a shorter message.'
-      });
-
-      continue;
-    }
-
-    if (demoConfig.demoMode && !isDemoActive()) {
-      console.log('DEMO WINDOW EXPIRED:', phone);
-      completeWhatsappMessage(messageId);
-      continue;
-    }
-
-    if (demoConfig.demoMode && isRateLimited(phone)) {
-      console.log('DEMO RATE LIMIT:', phone);
-
-      try {
-        await sock.sendMessage(phone, {
-          text: 'You have reached the demo message limit. Please try again in a minute.'
-        });
-        completeWhatsappMessage(messageId);
-      } catch (error) {
-        failWhatsappMessage(messageId, error.message);
-        console.error('Rate-limit response error:', error.message);
-      }
-
-      continue;
-    }
-
     console.log('\nUSER:', text);
 
     try {
@@ -612,14 +533,15 @@ async function start() {
         continue;
       }
 
-      const hasInboundContact = hasInboundMessageForPhone(normalizedPhone);
-      if (!hasInboundContact && !normalizedPhone.endsWith('@g.us')) {
-        console.log('OUTBOUND DM BLOCKED: no prior inbound contact from', normalizedPhone);
+      if (!canSendOutboundDm(normalizedPhone)) {
+        console.log(
+          'OUTBOUND BLOCKED: no qualifying inbound DM',
+          normalizedPhone
+        );
         completeWhatsappMessage(messageId);
         continue;
       }
 
-      console.log('OUTBOUND SEND TARGET:', phone, 'NORMALIZED:', normalizedPhone);
       await sock.sendMessage(phone, {
         text: result.reply
       });
@@ -632,14 +554,18 @@ async function start() {
 
       failWhatsappMessage(messageId, error.message);
 
-      if (policy.reply) {
-        try {
-          await sock.sendMessage(phone, {
-            text: 'Sorry, something went wrong. Please try again.'
-          });
-        } catch (fallbackError) {
-          console.error('Fallback response error:', fallbackError.message);
-        }
+      if (
+        policy.reply &&
+        canSendOutboundDm(normalizedPhone)
+      ) {
+        await sock.sendMessage(phone, {
+          text: 'Sorry, something went wrong. Please try again.'
+        });
+      } else {
+        console.log(
+          'ERROR REPLY BLOCKED: no qualifying inbound DM',
+          normalizedPhone
+        );
       }
     }
     }
