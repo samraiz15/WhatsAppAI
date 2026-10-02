@@ -4,6 +4,18 @@ const { getParkViewContext } = require('./parkview_knowledge');
 function detectIntent(message) {
   const t = String(message || '').toLowerCase().trim();
 
+  if (/\b(?:approval|approved|lda|ruda|noc|legal|documentation)\b/.test(t)) {
+    return 'approval';
+  }
+
+  if (/\b(?:payment|installment|installments|payment plan)\b/.test(t)) {
+    return 'payment_plan';
+  }
+
+  if (/\b(?:gas|electricity|electric|water|sewerage|utility|utilities)\b/.test(t)) {
+    return 'utilities';
+  }
+
   if (
     /\b(i want|i need|looking for|searching for|find me|show me|interested in)\b/.test(t) &&
     /\b(house|home|villa|plot|apartment|flat|property)\b/.test(t)
@@ -127,6 +139,10 @@ function deterministicAnswer(intent, lead = {}) {
 
   if (intent === 'platinum') {
     return `Platinum is worth considering if the specific property justifies the price, but some current 5-marla asking stock is above a PKR 2 crore target. I would first check whether the seller is negotiable and whether the property's location, construction and other advantages justify stretching the budget.`;
+  }
+
+  if (intent === 'payment_plan') {
+    return "Payment plans vary by the specific Park View City block, property type and seller/developer offer. I don't want to invent a current installment schedule. Tell me the block and whether you mean a house or plot, and I can narrow it down.";
   }
 
   if (intent === 'price') {

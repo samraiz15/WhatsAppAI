@@ -190,11 +190,20 @@ function detectArea(message) {
   return match ? match[1].trim() : null;
 }
 function detectName(message) {
-  const match = message.match(
+  const text = String(message || '').trim();
+
+  const match = text.match(
     /^(?:my name is|i am|i'm|this is)\s+([a-zA-Z][a-zA-Z\s'-]{1,40})$/i
   );
 
-  return match ? match[1].trim() : null;
+  if (match) return match[1].trim();
+
+  return null;
+}
+
+function isGreeting(message) {
+  return /^(?:hi|hello|hey|salam|assalam(?:[-\s]?o[-\s]?alaikum)?|assalamualaikum|aoa)$/i
+    .test(String(message || '').trim());
 }
 
 function detectPropertySize(message) {
@@ -976,20 +985,36 @@ async function processMessage(phone, message, options = {}) {
 
   addMessage(phone, 'incoming', message);
 
-  const faq = findFAQ(message);
+  const existingLead = getOrCreateLead(phone);
 
-  if (faq) {
-    addMessage(phone, 'outgoing', faq);
-    return {
-      reply: faq,
-      lead: getOrCreateLead(phone)
-    };
-  }
+  const wasIncomplete =
+    !existingLead.name ||
+    !existingLead.interest ||
+    !existingLead.budget ||
+    !existingLead.area ||
+    !existingLead.timeline;
 
   const lead = getOrCreateLead(phone);
 
-  if (/park\s*view(?:\s*city)?/i.test(String(message || '')) ||
-      /\b(?:amenities|amenity|facilities|facility|park|mosque|school|schools|commercial|location|located|payment plan|installments?|prices?|availability|available|blocks?)\b/i.test(String(message || ''))) {
+  if (isGreeting(message)) {
+    const reply =
+      'Assalam o Alaikum! 👋 How can I help you today? ' +
+      'Are you looking for a house, plot, apartment, or another property?';
+
+    addMessage(phone, 'outgoing', reply);
+
+    return {
+      reply,
+      lead
+    };
+  }
+
+  if (
+    /park\s*view(?:\s*city)?/i.test(String(message || '')) ||
+    /\b(?:jade|jasmine|sapphire|crystal|diamond|platinum|rose|tulip|topaz)\b/i.test(String(message || '')) ||
+    /\b(?:noc|lda|ruda|approval|approved|payment plan|installments?|utilities|gas|electricity|water|sewerage)\b/i.test(String(message || '')) ||
+    /\b(?:amenities|amenity|facilities|facility|park|mosque|school|schools|commercial|location|located|prices?|availability|available|blocks?)\b/i.test(String(message || ''))
+  ) {
     const routed = await routeParkViewQuestion(message, lead);
 
     if (routed && routed.answer) {
@@ -1005,7 +1030,24 @@ async function processMessage(phone, message, options = {}) {
     }
   }
 
-  if (lead.name && lead.interest && lead.budget && lead.area && lead.timeline) {
+  const faq = findFAQ(message);
+
+  if (faq) {
+    addMessage(phone, 'outgoing', faq);
+    return {
+      reply: faq,
+      lead
+    };
+  }
+
+  if (
+    wasIncomplete &&
+    lead.name &&
+    lead.interest &&
+    lead.budget &&
+    lead.area &&
+    lead.timeline
+  ) {
     const reply =
       `Perfect, ${lead.name}. I've noted your ${lead.property_size ? lead.property_size + ' ' : ''}` +
       `${lead.interest} requirement in ${lead.area} with a ${lead.budget} budget and ` +
@@ -1040,6 +1082,24 @@ async function processMessage(phone, message, options = {}) {
     }
   }
 
+  if (
+    lead.name &&
+    lead.interest &&
+    lead.budget &&
+    lead.area &&
+    lead.timeline
+  ) {
+    const reply =
+      `Thanks ${lead.name}. I have your requirements and we'll help you with the next steps.`;
+
+    addMessage(phone, 'outgoing', reply);
+
+    return {
+      reply,
+      lead
+    };
+  }
+
   let reply;
 
   try {
@@ -1070,6 +1130,7 @@ availability, locations, or business policies.`
 }
 
 module.exports = {
+  detectName,
   detectInterest,
   processMessage,
   detectArea,
