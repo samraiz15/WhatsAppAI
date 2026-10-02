@@ -982,14 +982,11 @@ async function processMessage(phone, message, options = {}) {
     };
   }
 
+  const extracted = extractLeadFields(message);
+
   const info = {
-    name: detectName(message),
-    interest: detectInterest(message),
-    budget: detectBudget(message),
-    budget_numeric: parseBudgetNumeric(detectBudget(message)),
-    area: detectArea(message),
-    timeline: detectTimeline(message),
-    property_size: detectPropertySize(message),
+    ...extracted,
+    budget_numeric: parseBudgetNumeric(extracted.budget),
     notes: null
   };
 
