@@ -206,6 +206,18 @@ function isGreeting(message) {
     .test(String(message || '').trim());
 }
 
+function extractLeadFields(message) {
+  const text = String(message || "").trim();
+  return {
+    name: detectName(text),
+    interest: detectInterest(text),
+    budget: detectBudget(text),
+    area: detectArea(text),
+    timeline: detectTimeline(text),
+    property_size: detectPropertySize(text)
+  };
+}
+
 function detectPropertySize(message) {
   const match = String(message || '').match(
     /\b(3\.5|5|7|10|15|20)\s*marla\b|\b(1|2)\s*kanal\b/i
@@ -1137,6 +1149,7 @@ module.exports = {
   detectBudget,
   detectTimeline,
   detectPropertySize,
+  extractLeadFields,
   parseBudgetNumeric,
   normalizePropertyText,
   detectSearchPropertyType,

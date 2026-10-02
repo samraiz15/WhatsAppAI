@@ -8,13 +8,22 @@ for (const file of ['agent.test.db', 'agent.test.db-shm', 'agent.test.db-wal']) 
 }
 
 const {
-  processMessage,
+  extractLeadFields,
   detectInterest,
+  processMessage,
+  detectArea,
+  detectBudget,
+  detectTimeline,
   detectPropertySize,
   parseBudgetNumeric,
+  normalizePropertyText,
   detectSearchPropertyType,
+  detectSearchBlock,
   detectSearchSize,
-  detectSearchBudget
+  detectSearchBudget,
+  propertyTypeMatches,
+  scorePropertyMatch,
+  rankPropertySearchResults
 } = require('./conversation');
 const { hasInboundMessageForPhone } = require('./db');
 
@@ -96,6 +105,22 @@ function testPropertyParsing() {
   assert.strictEqual(parseBudgetNumeric('2 crore'), 20000000);
 
   console.log('PASS: property parsing regression');
+
+const extracted = extractLeadFields('I need a 5 marla house in DHA Lahore');
+if (extracted.interest !== 'House') throw new Error('extractLeadFields interest failed');
+if (extracted.property_size !== '5 marla') throw new Error('extractLeadFields size failed');
+if (extracted.area !== 'DHA Lahore') throw new Error('extractLeadFields area failed');
+
+const extractedBudget = extractLeadFields('My budget is 2 crore');
+if (extractedBudget.budget !== '2 crore') throw new Error('extractLeadFields budget failed');
+
+const extractedTimeline = extractLeadFields('I want to buy in 3 months');
+if (extractedTimeline.timeline !== '3 months') throw new Error('extractLeadFields timeline failed');
+
+const extractedName = extractLeadFields('My name is Ahmed');
+if (extractedName.name !== 'Ahmed') throw new Error('extractLeadFields name failed');
+
+console.log('PASS: extract lead fields regression');
 }
 
 function testSearchParsing() {
