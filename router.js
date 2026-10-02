@@ -50,6 +50,11 @@ function detectIntent(message) {
     return 'location';
   }
 
+  // Price must be checked before generic "park" / amenities matching.
+  if (/price|prices|cost|rate|rates|how much|worth|value/.test(t)) {
+    return 'price';
+  }
+
   if (/\b(crystal)\b/.test(t)) {
     return 'crystal';
   }
@@ -125,7 +130,7 @@ function deterministicAnswer(intent, lead = {}) {
   }
 
   if (intent === 'price') {
-    return `Current portal prices should be treated as asking prices, not confirmed sold prices. For a ${size} house around ${budget}, I would compare several fresh listings and adjust for exact street, construction, location, possession, utilities and seller motivation before judging whether the price is fair.`;
+    return `I do not have a verified current figure for that property. Portal prices are asking prices, not confirmed sold prices, so the exact block, property condition and fresh listing evidence should be checked before relying on a figure.`;
   }
 
   if (intent === 'utilities') {
@@ -139,7 +144,7 @@ function deterministicAnswer(intent, lead = {}) {
   return null;
 }
 
-async function routeParkViewQuestion(message, lead = {}) {
+async function routeParkViewQuestionRaw(message, lead = {}) {
   const intent = detectIntent(message);
   const t = String(message || '').toLowerCase();
 
@@ -157,6 +162,16 @@ async function routeParkViewQuestion(message, lead = {}) {
     if (/\bplatinum\b/.test(t)) {
       return "Current advertised 5-marla house listings in Platinum are roughly 1.6 crore to 2.3 crore. These are asking prices, not verified sold prices.";
     }
+  }
+
+  // Current NOC/status questions must use verification-based handling.
+  // They must run before the simple block approval shortcut below.
+  if (/\b(n[o0]c|current\s+(?:status|approval)|latest\s+(?:status|approval))\b/.test(t) &&
+      /\b(jade|jasmine|sapphire|crystal|diamond|platinum|rose|tulip|topaz|extension|block)\b/.test(t)) {
+    return {
+      answer: "I do not have a verified current NOC/status for that exact block or property. The current authority record and property documentation should be checked before relying on an approval claim.",
+      source: "Park View NOC verification"
+    };
   }
 
   // Exact approval questions should not require Ollama.
@@ -259,6 +274,25 @@ async function routeParkViewQuestion(message, lead = {}) {
     }
   }
 
+  if (/\b(approved|approval|lda|ruda|noc)\b/.test(t)) {
+    return {
+      answer: `Approval status for the exact Park View City block/property needs to be verified with the relevant authority and current property documentation. I would not treat the society-wide name as proof of approval.`,
+      source: 'Park View approval verification'
+    };
+  }
+
+  // General Park View questions must still return a provenance-aware
+  // response when deterministic routing has no more specific answer.
+  if (
+    intent === 'unknown' &&
+    /\b(tell me about|about park view|park view city)\b/.test(t)
+  ) {
+    return {
+      answer: "Park View City Lahore information should be interpreted by source, scope and date. For property-specific claims, verify the exact block or property against the relevant current authority or project record.",
+      source: "Park View provenance-scoped knowledge"
+    };
+  }
+
   const prompt = `
 You are a professional Park View City Lahore real-estate consultant.
 
@@ -289,7 +323,21 @@ ${String(message)}
 ANSWER:
 `.trim();
 
-  return await askOllama(prompt, [], lead);
+  return { answer: await askOllama(prompt, [], lead), source: 'Ollama fallback' };
+}
+
+
+async function routeParkViewQuestion(message, lead = {}) {
+  const result = await routeParkViewQuestionRaw(message, lead);
+
+  if (result && typeof result === 'object') {
+    return result;
+  }
+
+  return {
+    answer: String(result ?? ''),
+    source: 'Park View deterministic response'
+  };
 }
 
 module.exports = {
