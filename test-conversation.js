@@ -58,7 +58,7 @@ async function testLeadConversation() {
       assert.strictEqual(
         result.reply,
         expectedReplies[i],
-        `Unexpected reply after "${messages[i]}"`
+
       );
     }
   }
@@ -70,7 +70,13 @@ async function testLeadConversation() {
   assert.strictEqual(result.lead.area, 'DHA Lahore');
   assert.strictEqual(result.lead.timeline, '3 months');
 
+  assert.ok(
+    result.reply.includes('Thanks Ahmed'),
+    'completed lead deterministic response failed'
+  );
+
   console.log('PASS: lead conversation regression');
+  console.log('PASS: completed lead deterministic response regression');
 }
 
 async function testNameDetection() {
