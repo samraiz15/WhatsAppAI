@@ -13,7 +13,17 @@ const {
   setMonitoredGroupJid,
   isContactAllowed
 } = require('./groups');
-const { addGroupMessage, registerWhatsappMessage, claimWhatsappMessage, completeWhatsappMessage, failWhatsappMessage } = require('./db');
+const {
+  addGroupMessage,
+  registerWhatsappMessage,
+  claimWhatsappMessage,
+  completeWhatsappMessage,
+  failWhatsappMessage,
+  getLeadsDueForFollowUp,
+  claimFollowUp,
+  completeFollowUp,
+  failFollowUp
+} = require('./db');
 const { extractMessageText } = require('./message-utils');
 const { classify, compactLog } = require('./ingestPolicy');
 const { sendOutboundMessage } = require('./outbound-guard');
@@ -102,16 +112,23 @@ async function start() {
 
   async function runCrmFollowUps() {
     try {
-      const { getLeadsDueForFollowUp } = require('./db');
-
-      const leads = getLeadsDueForFollowUp(new Date());
+      const now = new Date();
+      const leads = getLeadsDueForFollowUp(now);
 
       if (!Array.isArray(leads) || !leads.length) {
         return;
       }
 
+      const claimedLeads = leads.filter((lead) => {
+        return claimFollowUp(lead.id);
+      });
+
+      if (!claimedLeads.length) {
+        return;
+      }
+
       const result = await processFollowUps(
-        leads,
+        claimedLeads,
         async (jid, message) => {
           return sendOutboundMessage(
             sock,
@@ -124,12 +141,25 @@ async function start() {
             }
           );
         },
-        new Date()
+        now
       );
+
+      for (const item of result.sent) {
+        if (item.id != null) {
+          completeFollowUp(item.id);
+        }
+      }
+
+      for (const item of result.failed) {
+        if (item.id != null) {
+          failFollowUp(item.id);
+        }
+      }
 
       console.log(
         'CRM FOLLOW-UP:',
         `due=${result.due.length}`,
+        `claimed=${claimedLeads.length}`,
         `sent=${result.sent.length}`,
         `failed=${result.failed.length}`
       );

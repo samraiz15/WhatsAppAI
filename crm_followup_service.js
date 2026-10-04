@@ -26,7 +26,11 @@ async function processFollowUps(
     };
   }
 
-  const dispatched = await dispatchFollowUps(due, sendMessage);
+  const dispatched = await dispatchFollowUps(
+    due,
+    sendMessage,
+    now
+  );
 
   return {
     due,

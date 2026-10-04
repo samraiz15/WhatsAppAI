@@ -1,5 +1,7 @@
 'use strict';
 
+process.env.WHATSAPPAI_DB_PATH = './agent.test.db';
+
 const assert = require('assert');
 const { processFollowUps } = require('./crm_followup_service');
 
