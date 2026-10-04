@@ -29,6 +29,15 @@ const { classify, compactLog } = require('./ingestPolicy');
 const { sendOutboundMessage } = require('./outbound-guard');
 const { processFollowUps } = require('./crm_followup_service');
 
+function leadPhoneToJid(phone) {
+  const value = String(phone || "").trim();
+  if (!value) return "";
+  if (value.endsWith("@s.whatsapp.net")) return value;
+  if (value.startsWith("+")) return value.slice(1) + "@s.whatsapp.net";
+  if (/^[0-9]+$/.test(value)) return value + "@s.whatsapp.net";
+  return value;
+}
+
 const AUTH_DIR = './pairing-auth';
 
 // Temporary 3-day demo: allow all customer DMs.
