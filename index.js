@@ -214,14 +214,14 @@ async function start() {
       inboundDmAuthorization.clear();
       console.log('OUTBOUND DM AUTHORIZATION RESET: new connection session');
       console.log('Connection:', connection, '| State:', connectionState);
-    }
 
-      if (!crmStartupFollowUpRan) {
+      if (crmStartupFollowUpRan === false) {
         crmStartupFollowUpRan = true;
         runCrmFollowUps().catch(error => {
           console.error('CRM FOLLOW-UP STARTUP ERROR:', error.message);
         });
       }
+    }
 
     if (connection === 'connecting') {
       connectionState = CONNECTION_STATES.CONNECTING;
