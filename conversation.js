@@ -1058,6 +1058,12 @@ async function processMessage(phone, message, options = {}) {
     lead.area &&
     lead.timeline
   ) {
+    updateLeadInfo(phone, {
+      followup_days: 1
+    });
+
+    const refreshedLead = getOrCreateLead(phone);
+
     const reply =
       `Perfect, ${lead.name}. I've noted your ${lead.property_size ? lead.property_size + ' ' : ''}` +
       `${lead.interest} requirement in ${lead.area} with a ${lead.budget} budget and ` +
@@ -1067,7 +1073,7 @@ async function processMessage(phone, message, options = {}) {
 
     return {
       reply,
-      lead
+      lead: refreshedLead
     };
   }
 
