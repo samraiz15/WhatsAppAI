@@ -187,9 +187,6 @@ async function start() {
     }
   }, 5 * 60 * 1000);
 
-  runCrmFollowUps().catch(error => {
-    console.error('CRM FOLLOW-UP INITIAL RUN ERROR:', error.message);
-  });
 
   sock.ev.on('creds.update', saveCreds);
 
