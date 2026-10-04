@@ -307,6 +307,62 @@ function getAllLeads() {
   return getAllLeadsStmt.all();
 }
 
+const getLeadsDueForFollowUpStmt = db.prepare(`
+  SELECT *
+  FROM leads
+  WHERE followup_due_at IS NOT NULL
+    AND followup_due_at <= ?
+    AND (followup_status IS NULL OR followup_status != 'completed')
+`);
+
+function getLeadsDueForFollowUp(now = new Date()) {
+  const date = now instanceof Date ? now : new Date(now);
+
+  if (Number.isNaN(date.getTime())) {
+    throw new TypeError('now must be a valid date');
+  }
+
+  return getLeadsDueForFollowUpStmt.all(date.toISOString());
+}
+
+const claimFollowUpStmt = db.prepare(`
+  UPDATE leads
+  SET followup_status = 'processing',
+      updated_at = CURRENT_TIMESTAMP
+  WHERE id = ?
+    AND followup_due_at IS NOT NULL
+    AND (followup_status IS NULL OR followup_status != 'completed')
+`);
+
+function claimFollowUp(leadId) {
+  const result = claimFollowUpStmt.run(leadId);
+  return result.changes === 1;
+}
+
+const completeFollowUpStmt = db.prepare(`
+  UPDATE leads
+  SET followup_status = 'completed',
+      updated_at = CURRENT_TIMESTAMP
+  WHERE id = ?
+`);
+
+function completeFollowUp(leadId) {
+  const result = completeFollowUpStmt.run(leadId);
+  return result.changes === 1;
+}
+
+const failFollowUpStmt = db.prepare(`
+  UPDATE leads
+  SET followup_status = NULL,
+      updated_at = CURRENT_TIMESTAMP
+  WHERE id = ?
+`);
+
+function failFollowUp(leadId) {
+  const result = failFollowUpStmt.run(leadId);
+  return result.changes === 1;
+}
+
 function getOrCreateLead(phone) {
   let lead = findLead.get(phone);
 
@@ -445,6 +501,10 @@ module.exports = {
   db,
   getOrCreateLead,
   getAllLeads,
+  getLeadsDueForFollowUp,
+  claimFollowUp,
+  completeFollowUp,
+  failFollowUp,
   updateLeadInfo,
   addMessage,
   addGroupMessage,

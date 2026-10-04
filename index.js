@@ -16,6 +16,8 @@ const {
 const { addGroupMessage, registerWhatsappMessage, claimWhatsappMessage, completeWhatsappMessage, failWhatsappMessage } = require('./db');
 const { extractMessageText } = require('./message-utils');
 const { classify, compactLog } = require('./ingestPolicy');
+const { sendOutboundMessage } = require('./outbound-guard');
+const { processFollowUps } = require('./crm_followup_service');
 
 const AUTH_DIR = './pairing-auth';
 
@@ -97,6 +99,44 @@ async function start() {
     logger: P({ level: 'silent' }),
     browser: Browsers.ubuntu('WhatsApp AI Agent')
   });
+
+  async function runCrmFollowUps() {
+    try {
+      const { getLeadsDueForFollowUp } = require('./db');
+
+      const leads = getLeadsDueForFollowUp(new Date());
+
+      if (!Array.isArray(leads) || !leads.length) {
+        return;
+      }
+
+      const result = await processFollowUps(
+        leads,
+        async (jid, message) => {
+          return sendOutboundMessage(
+            sock,
+            jid,
+            { text: message },
+            {
+              authorizedJids: inboundDmAuthorization,
+              connectionState,
+              connectedState: CONNECTION_STATES.CONNECTED
+            }
+          );
+        },
+        new Date()
+      );
+
+      console.log(
+        'CRM FOLLOW-UP:',
+        `due=${result.due.length}`,
+        `sent=${result.sent.length}`,
+        `failed=${result.failed.length}`
+      );
+    } catch (error) {
+      console.error('CRM FOLLOW-UP ERROR:', error.message);
+    }
+  }
 
   sock.ev.on('creds.update', saveCreds);
 
@@ -550,9 +590,16 @@ async function start() {
         continue;
       }
 
-      await sock.sendMessage(phone, {
-        text: result.reply
-      });
+      await sendOutboundMessage(
+        sock,
+        phone,
+        { text: result.reply },
+        {
+          authorizedJids: inboundDmAuthorization,
+          connectionState,
+          connectedState: CONNECTION_STATES.CONNECTED
+        }
+      );
 
       completeWhatsappMessage(messageId);
 
@@ -566,9 +613,16 @@ async function start() {
         policy.reply &&
         canSendOutboundDm(normalizedPhone)
       ) {
-        await sock.sendMessage(phone, {
-          text: 'Sorry, something went wrong. Please try again.'
-        });
+        await sendOutboundMessage(
+          sock,
+          phone,
+          { text: 'Sorry, something went wrong. Please try again.' },
+          {
+            authorizedJids: inboundDmAuthorization,
+            connectionState,
+            connectedState: CONNECTION_STATES.CONNECTED
+          }
+        );
       } else {
         console.log(
           'ERROR REPLY BLOCKED: no qualifying inbound DM',
