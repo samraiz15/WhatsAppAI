@@ -71,7 +71,7 @@ async function testLeadConversation() {
   assert.strictEqual(result.lead.timeline, '3 months');
 
   assert.ok(
-    result.reply.includes('Thanks Ahmed'),
+    result.reply.includes('Perfect, Ahmed'),
     'completed lead deterministic response failed'
   );
 

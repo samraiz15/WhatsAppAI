@@ -983,6 +983,15 @@ async function processMessage(phone, message, options = {}) {
     };
   }
 
+  const existingLead = getOrCreateLead(phone);
+
+  const wasIncomplete =
+    !existingLead.name ||
+    !existingLead.interest ||
+    !existingLead.budget ||
+    !existingLead.area ||
+    !existingLead.timeline;
+
   const extracted = extractLeadFields(message);
 
   const info = {
@@ -994,15 +1003,6 @@ async function processMessage(phone, message, options = {}) {
   updateLeadInfo(phone, info);
 
   addMessage(phone, 'incoming', message);
-
-  const existingLead = getOrCreateLead(phone);
-
-  const wasIncomplete =
-    !existingLead.name ||
-    !existingLead.interest ||
-    !existingLead.budget ||
-    !existingLead.area ||
-    !existingLead.timeline;
 
   const lead = getOrCreateLead(phone);
 
@@ -1098,23 +1098,6 @@ async function processMessage(phone, message, options = {}) {
     }
   }
 
-  if (
-    lead.name &&
-    lead.interest &&
-    lead.budget &&
-    lead.area &&
-    lead.timeline
-  ) {
-    const reply =
-      `Thanks ${lead.name}. I have your requirements and we'll help you with the next steps.`;
-
-    addMessage(phone, 'outgoing', reply);
-
-    return {
-      reply,
-      lead
-    };
-  }
 
   let reply;
 
