@@ -146,7 +146,6 @@ async function start() {
             jid,
             { text: message },
             {
-              authorizedJids: inboundDmAuthorization,
               connectionState,
               connectedState: CONNECTION_STATES.CONNECTED
             }
