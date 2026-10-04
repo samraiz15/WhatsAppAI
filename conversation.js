@@ -202,8 +202,9 @@ function detectName(message) {
 }
 
 function isGreeting(message) {
-  return /^(?:hi|hello|hey|salam|assalam(?:[-\s]?o[-\s]?alaikum)?|assalamualaikum|aoa)$/i
-    .test(String(message || '').trim());
+  const text = String(message || '').trim();
+  const normalized = text.normalize('NFD').replace(/[\u064B-\u065F\u0670]/g, '');
+  return /^(?:hi|hello|hey|salam|assalam(?:[- ]?o[- ]?alaikum)?|assalamualaikum|aoa|السلام\s*علیکم|السلام\s*عليكم|السلام\s*عليكم|سلام)$/iu.test(normalized);
 }
 
 function extractLeadFields(message) {

@@ -22,7 +22,7 @@ const AUTH_DIR = './pairing-auth';
 // Temporary 3-day demo: allow all customer DMs.
 // Owner commands remain owner-only.
 const DEMO_DM_ENABLED = true;
-const DEMO_DM_EXPIRES_AT = new Date('2026-10-04T01:18:00+05:00').getTime();
+const DEMO_DM_EXPIRES_AT = new Date('2026-10-10T23:59:59+05:00').getTime();
 
 function isDemoDmActive() {
   return DEMO_DM_ENABLED && Date.now() < DEMO_DM_EXPIRES_AT;
@@ -206,19 +206,33 @@ async function start() {
         continue;
       }
 
+      const isGroupMessage = String(
+        message.key?.remoteJid ||
+        message.key?.remoteJidAlt ||
+        ''
+      ).endsWith('@g.us');
+
       const policy = classify(
         {
           ts: message.messageTimestamp,
           fromMe: message.key?.fromMe === true,
-          isGroup: String(
-            message.key?.remoteJid ||
-            message.key?.remoteJidAlt ||
-            ''
-          ).endsWith('@g.us'),
+          isGroup: isGroupMessage,
           upsertType: type
         },
         nowSec
       );
+
+      // Demo mode: every fresh inbound DM may receive a reply.
+      // Groups remain ingest-only.
+      if (
+        isDemoDmActive() &&
+        !isGroupMessage &&
+        !message.key?.fromMe &&
+        policy.ingest
+      ) {
+        policy.reply = true;
+        policy.reason = 'dm_demo_live';
+      }
 
       console.log('INGEST POLICY:', messageId, policy);
 
@@ -280,12 +294,6 @@ async function start() {
       console.error('MESSAGE IDEMPOTENCY ERROR:', error.message);
       continue;
     }
-
-    const isGroupMessage = String(
-      message.key?.remoteJid ||
-      message.key?.remoteJidAlt ||
-      ''
-    ).endsWith('@g.us');
 
     if (!policy.reply && !isGroupMessage) {
       console.log(
