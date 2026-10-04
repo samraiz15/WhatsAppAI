@@ -356,6 +356,11 @@ async function start() {
         JSON.stringify(message, null, 2)
       );
 
+      if (message?.broadcast === true || message?.key?.remoteJid === 'status@broadcast') {
+        console.log('MESSAGE SKIPPED: WhatsApp status/broadcast');
+        continue;
+      }
+
       if (!message?.message) {
         console.log('MESSAGE SKIPPED: no message payload');
         continue;
