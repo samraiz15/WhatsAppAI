@@ -939,3 +939,15 @@ Do not start with dashboard/UI.
 ==================================================
 END OF HANDOFF
 ==================================================
+
+## Additions (2026-10-04)
+- LID -> phone normalization works. Monitored group: Al-Kaywan Marketing (PVCL). Group/owner JIDs live in config, not in the repo.
+- Groups: ingest + alert only, no auto-reply. The DM inbound-first rule does not apply to groups; group behavior must be explicit.
+- STT: local whisper.cpp behind transcribeAudio() (provider-swappable). Limits: MAX_AUDIO_SECONDS, MAX_AUDIO_MB. Delete temp audio after transcription (DEBUG_KEEP_MEDIA=false by default). Failed STT -> ask the customer to resend/type; never a generic property answer.
+- Voice message states: received, processing, transcribing, processed, failed, needs_human. Keep existing claim/retry guarantees.
+- Numbers (marla/kanal/crore/lakh) use deterministic normalization; confirm ambiguous critical values.
+- Urgency: urgency.js classifyUrgency(message, lead) -> {level, reasons}; levels NORMAL/HIGH/URGENT/CRITICAL; thresholds in config (e.g. URGENT_BUDGET_PKR), phrase lists in a vocabulary module.
+- Alerts: notifications.js notifyRealtor(alert), ntfy first (Android-first; test iOS separately; self-host if privacy matters). realtor_alerts table + notification_outbox with bounded retries. One alert per event, update on new messages, re-notify only on higher severity or cooldown. Alert failure must never break the customer reply.
+- Outbound sends require connection state CONNECTED. Inbound authorization is in-memory (fail-closed on restart); never infer it from a lead or contact existing in the DB.
+- Logging: no Baileys session/crypto objects or raw payloads in normal logs. Never commit pairing-auth, agent.db, voice files or secrets.
+- Next: voice note -> local transcription -> processMessage(), then urgent alert -> realtor push.
