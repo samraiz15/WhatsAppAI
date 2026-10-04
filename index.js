@@ -128,13 +128,26 @@ async function start() {
         return;
       }
 
-      const claimedLeads = leads.filter((lead) => {
+      const authorizedLeads = leads.filter((lead) =>
+        isDemoDmActive() || canSendOutboundDm(lead.phone)
+      );
+
+      if (!authorizedLeads.length) {
+        console.log("CRM FOLLOW-UP: no authorized leads");
+        return;
+      }
+
+      const claimedLeads = authorizedLeads.filter((lead) => {
         return claimFollowUp(lead.id);
       });
 
       if (!claimedLeads.length) {
         return;
       }
+
+      const authorizedJids = new Set(
+        authorizedLeads.map((lead) => leadPhoneToJid(lead.phone))
+      );
 
       const result = await processFollowUps(
         claimedLeads,
@@ -146,6 +159,7 @@ async function start() {
             jid,
             { text: message },
             {
+              authorizedJids,
               connectionState,
               connectedState: CONNECTION_STATES.CONNECTED
             }
@@ -459,7 +473,8 @@ async function start() {
       continue;
     }
 
-    // Only a fresh, eligible inbound DM authorizes replies to this number.
+
+    // Authorize a fresh inbound customer DM for this connection session.
     if (
       !isGroupMessage &&
       policy.reply &&
@@ -467,10 +482,7 @@ async function start() {
       connectionState === CONNECTION_STATES.CONNECTED
     ) {
       authorizeInboundDm(normalizedPhone);
-
-      if (canSendOutboundDm(normalizedPhone)) {
-        console.log('OUTBOUND DM AUTHORIZED:', normalizedPhone);
-      }
+      console.log("OUTBOUND DM AUTHORIZED:", normalizedPhone);
     }
 
     if (phone.endsWith('@g.us')) {
@@ -651,7 +663,11 @@ async function start() {
         continue;
       }
 
-      if (!canSendOutboundDm(normalizedPhone)) {
+      if (isDemoDmActive()) {
+      authorizeInboundDm(normalizedPhone);
+    }
+
+    if (!isDemoDmActive() && !canSendOutboundDm(normalizedPhone)) {
         console.log(
           'OUTBOUND BLOCKED: no qualifying inbound DM',
           normalizedPhone
