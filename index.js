@@ -138,7 +138,9 @@ async function start() {
 
       const result = await processFollowUps(
         claimedLeads,
-        async (jid, message) => {
+        async (phone, message) => {
+          const jid = leadPhoneToJid(phone);
+
           return sendOutboundMessage(
             sock,
             jid,
@@ -160,6 +162,12 @@ async function start() {
       }
 
       for (const item of result.failed) {
+        console.error(
+          "CRM FOLLOW-UP FAILED:",
+          item.phone,
+          item.error
+        );
+
         if (item.id != null) {
           failFollowUp(item.id);
         }
