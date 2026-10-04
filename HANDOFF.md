@@ -951,3 +951,18 @@ END OF HANDOFF
 - Outbound sends require connection state CONNECTED. Inbound authorization is in-memory (fail-closed on restart); never infer it from a lead or contact existing in the DB.
 - Logging: no Baileys session/crypto objects or raw payloads in normal logs. Never commit pairing-auth, agent.db, voice files or secrets.
 - Next: voice note -> local transcription -> processMessage(), then urgent alert -> realtor push.
+
+## More rules
+- fromMe events: ingest false, never reply (replies create new events; never respond to our own message).
+- Never promise a callback time unless the realtor has configured one. Escalation reply: acknowledge, say the realtor will follow up.
+- Every answer ends as ANSWERED, ASK_CLARIFICATION, ESCALATE or FAILED. No evidence = no fact; separate FACT (inventory data) from OPINION.
+- Escalate on: human/call request, urgency, high value, ready to buy/pay/token, complaint, legal/document issue, unclear critical voice info, unknown or conflicting property info, repeated failures, frustration, negotiation.
+- Urgent phrases (keep in a vocabulary module, grow from real chats): urgent, call me/now, today, right now, ready to buy/pay, token, payment, visit, deal, finalize, complaint, legal, fraud, refund; Roman Urdu: jaldi, foran, abhi, call karen, aaj, token, masla, shikayat.
+- High-value: budget >= threshold AND timeline <= 30 days -> HIGH; budget >= threshold AND viewing request -> URGENT; ready to pay/token -> CRITICAL.
+- Demo expiry: test exact boundary, after expiry, timezone; log status; never extend silently.
+- V1 replies are text only (no voice replies, no TTS).
+- Test matrix (real WhatsApp): text (greetings in 3 scripts, search, budget, timeline, human/urgent), voice (English, Urdu, Roman Urdu, mixed, noisy, unclear, long, multiple), security (unknown customer, bot outbound, owner, unauthorized owner command, group vs monitored group, LID).
+- Failure tests: reconnect, duplicate, DB locked, STT/media failure, expired media, notification down/timeout, restart, malformed/empty/oversized audio, ambiguous budget/property. Expected: fail closed, never guess.
+- Demo ready when: all greetings, lead capture, search, provenance, unknown inbound accepted, no unsolicited DM, fromMe ignored, owner commands protected, group monitoring, voice transcribed (Urdu and Roman Urdu tested), critical numbers validated, failed STT handled, urgent detected, phone alert with details, alert deduplicated, notification failure does not crash the bot, restart/reconnect tested, npm test passes, git diff reviewed, secrets/auth excluded.
+- Do NOT build yet: CRM, web dashboard, multi-agent orchestration, LLM-first pipeline, auto voice replies, autonomous negotiation, outbound campaigns, bulk messaging, auto follow-ups, vector DB.
+- Session start: git status; git diff; git log --oneline -8; npm test. Never `git add .` (backup, auth and DB files).
