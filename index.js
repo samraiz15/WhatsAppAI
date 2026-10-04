@@ -138,6 +138,14 @@ async function start() {
     }
   }
 
+  const crmFollowUpTimer = setInterval(() => {
+    if (connectionState === CONNECTION_STATES.CONNECTED) {
+      runCrmFollowUps().catch(error => {
+        console.error('CRM FOLLOW-UP TIMER ERROR:', error.message);
+      });
+    }
+  }, 5 * 60 * 1000);
+
   sock.ev.on('creds.update', saveCreds);
 
   sock.ev.on('connection.update', async ({
@@ -172,6 +180,7 @@ async function start() {
     }
 
     if (connection === 'close') {
+      clearInterval(crmFollowUpTimer);
       connectionState = CONNECTION_STATES.DISCONNECTED;
       console.log('Connection:', connection, '| State:', connectionState);
     }
