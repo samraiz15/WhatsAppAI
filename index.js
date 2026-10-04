@@ -177,6 +177,8 @@ async function start() {
     }
   }
 
+  let crmStartupFollowUpRan = false;
+
   const crmFollowUpTimer = setInterval(() => {
     if (connectionState === CONNECTION_STATES.CONNECTED) {
       runCrmFollowUps().catch(error => {
@@ -216,6 +218,13 @@ async function start() {
       console.log('OUTBOUND DM AUTHORIZATION RESET: new connection session');
       console.log('Connection:', connection, '| State:', connectionState);
     }
+
+      if (!crmStartupFollowUpRan) {
+        crmStartupFollowUpRan = true;
+        runCrmFollowUps().catch(error => {
+          console.error('CRM FOLLOW-UP STARTUP ERROR:', error.message);
+        });
+      }
 
     if (connection === 'connecting') {
       connectionState = CONNECTION_STATES.CONNECTING;
