@@ -129,7 +129,7 @@ async function start() {
       }
 
       const authorizedLeads = leads.filter((lead) =>
-        canSendOutboundDm(lead.phone)
+        canSendOutboundDm(leadPhoneToJid(lead.phone))
       );
 
       if (!authorizedLeads.length) {
