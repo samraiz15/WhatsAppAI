@@ -674,7 +674,7 @@ async function start() {
 
       await sendOutboundMessage(
         sock,
-        phone,
+        normalizedPhone,
         { text: result.reply },
         {
           authorizedJids: inboundDmAuthorization,
@@ -697,7 +697,7 @@ async function start() {
       ) {
         await sendOutboundMessage(
           sock,
-          phone,
+          normalizedPhone,
           { text: 'Sorry, something went wrong. Please try again.' },
           {
             authorizedJids: inboundDmAuthorization,
