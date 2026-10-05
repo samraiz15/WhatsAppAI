@@ -129,7 +129,7 @@ async function start() {
       }
 
       const authorizedLeads = leads.filter((lead) =>
-        isDemoDmActive() || canSendOutboundDm(lead.phone)
+        canSendOutboundDm(lead.phone)
       );
 
       if (!authorizedLeads.length) {
@@ -663,11 +663,7 @@ async function start() {
         continue;
       }
 
-      if (isDemoDmActive()) {
-      authorizeInboundDm(normalizedPhone);
-    }
-
-    if (!isDemoDmActive() && !canSendOutboundDm(normalizedPhone)) {
+      if (!canSendOutboundDm(normalizedPhone)) {
         console.log(
           'OUTBOUND BLOCKED: no qualifying inbound DM',
           normalizedPhone
