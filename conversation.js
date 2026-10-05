@@ -985,6 +985,8 @@ async function processMessage(phone, message, options = {}) {
 
   const existingLead = getOrCreateLead(phone);
 
+  const hasCompleteLead = Boolean(existingLead.name && existingLead.interest && existingLead.budget && existingLead.area && existingLead.timeline);
+
   const wasIncomplete =
     !existingLead.name ||
     !existingLead.interest ||
@@ -1098,6 +1100,33 @@ async function processMessage(phone, message, options = {}) {
     }
   }
 
+
+  if (hasCompleteLead) {
+    let reply;
+    try {
+      reply = await askOllama(
+        `You are the customer assistant for ${require('./agent').config.business.name}.
+Tone: ${require('./agent').config.business.tone}.
+
+Customer message:
+${message}
+
+Customer lead information:
+${JSON.stringify(lead)}
+
+Reply naturally in 1-2 short sentences. Answer the customer question directly. Do not invent property listings, prices, availability, locations, or business policies.`
+      );
+    } catch {
+      reply = `Thanks ${lead.name}. How can I help you with your property requirement?`;
+    }
+
+    addMessage(phone, 'outgoing', reply);
+
+    return {
+      reply,
+      lead
+    };
+  }
 
   let reply;
 

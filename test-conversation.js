@@ -79,6 +79,26 @@ async function testLeadConversation() {
   console.log('PASS: completed lead deterministic response regression');
 }
 
+async function testCompletedLeadCanAskInfo() {
+  const testPhone = '+923008888888';
+
+  await processMessage(testPhone, 'I need a house');
+  await processMessage(testPhone, '2 crore');
+  await processMessage(testPhone, 'DHA Lahore');
+  await processMessage(testPhone, 'in 3 months');
+  await processMessage(testPhone, 'My name is Ahmed');
+
+  const result = await processMessage(testPhone, 'What is the payment plan?');
+
+  assert.notStrictEqual(
+    result.reply,
+    'What is your approximate budget?',
+    'completed lead was incorrectly sent back to qualification'
+  );
+
+  console.log('PASS: completed lead can ask information questions');
+}
+
 async function testNameDetection() {
   const cases = [
     ['+923009999991', 'My name is Rajpoot', 'Rajpoot'],
@@ -194,6 +214,7 @@ async function main() {
   testPropertyParsing();
   testSearchParsing();
   await testLeadConversation();
+  await testCompletedLeadCanAskInfo();
   await testNameDetection();
   await testOutboundContactGuard();
 
